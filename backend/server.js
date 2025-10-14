@@ -1,9 +1,11 @@
 require('dotenv').config();
+const fetch = require('node-fetch');
 const express = require('express');
 const { spawn } = require('child_process');
 const { Pool } = require('pg');
 const cors = require('cors');
 const { google } = require('googleapis');
+const { OAuth2Client } = require('google-auth-library');
 
 const app = express();
 app.use(cors());
@@ -13,13 +15,13 @@ const pool = new Pool({
   user: 'postgres',
   host: 'localhost',
   database: 'affiliatebot',
-  password: process.env.POSTGRES_PASSWORD, // Loaded from .env
+  password: process.env.POSTGRES_PASSWORD,
   port: 5432,
 });
 
 const oauth2Client = new google.auth.OAuth2(
-  process.env.GOOGLE_CLIENT_ID, // Loaded from .env
-  process.env.GOOGLE_CLIENT_SECRET, // Loaded from .env
+  process.env.GOOGLE_CLIENT_ID,
+  process.env.GOOGLE_CLIENT_SECRET,
   'http://localhost:3001/api/auth/google/callback'
 );
 
@@ -30,24 +32,25 @@ app.post('/api/auth/google', async (req, res) => {
   }
 
   try {
-    oauth2Client.setCredentials({ access_token: token });
-    const youtube = google.youtube({ version: 'v3', auth: oauth2Client });
-    const channelResponse = await youtube.channels.list({
-      part: 'id,snippet',
-      mine: true,
+    const client = new OAuth2Client(process.env.GOOGLE_CLIENT_ID);
+    client._httpClient = { fetch: require('node-fetch') };
+    const ticket = await client.verifyIdToken({
+      idToken: token,
+      audience: process.env.GOOGLE_CLIENT_ID,
     });
+    const payload = ticket.getPayload();
+    const email = payload.email;
+    const sub = payload.sub;
 
-    if (!channelResponse.data.items || channelResponse.data.items.length === 0) {
-      return res.status(400).json({ error: 'No YouTube channel found for this account' });
-    }
-
+    // Return user data without a channelId for now
     const user = {
-      channelId: channelResponse.data.items[0].id,
-      email: channelResponse.data.items[0].snippet.customUrl || 'unknown',
+      email: email || 'unknown',
+      sub: sub, // Keep sub for reference
     };
 
     res.json({ user });
   } catch (err) {
+    console.error('OAuth Error:', err.message);
     res.status(500).json({ error: err.message });
   }
 });

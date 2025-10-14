@@ -14,24 +14,36 @@ function App() {
     console.log('App component mounted');
   }, []);
 
-  const handleLoginSuccess = async (credentialResponse) => {
-    console.log('Login Success:', credentialResponse);
-    setLoading(true);
-    try {
-      const authResponse = await axios.post('http://localhost:3001/api/auth/google', {
-        token: credentialResponse.credential,
-      });
-      setUser(authResponse.data.user);
-      setError('');
-      setShowLogin(false);
+ const handleLoginSuccess = async (credentialResponse) => {
+  console.log('Login Success - Credential Response:', credentialResponse);
+  setLoading(true);
+  try {
+    const authResponse = await axios.post('http://localhost:3001/api/auth/google', {
+      token: credentialResponse.credential,
+    });
+    console.log('Auth Response from Backend:', authResponse.data);
+    setUser(authResponse.data.user);
+    setError('');
+    setShowLogin(false);
 
-      await checkLinks(authResponse.data.user.channelId);
-    } catch (err) {
-      setError(err.response?.data?.error || 'Failed to log in with Google');
-    } finally {
-      setLoading(false);
+    // Temporary: Use a placeholder or prompt for channelId
+    const channelId = prompt('Please enter your YouTube Channel ID (e.g., UC1234567890):');
+    if (channelId) {
+      await checkLinks(channelId);
+    } else {
+      setError('Channel ID is required to check links.');
     }
-  };
+  } catch (err) {
+    console.error('Auth Error Details:', {
+      message: err.message,
+      response: err.response?.data,
+      status: err.response?.status,
+    });
+    setError(err.response?.data?.error || 'Failed to log in with Google');
+  } finally {
+    setLoading(false);
+  }
+};
 
   const handleLoginFailure = () => {
     console.log('Login Failed');
