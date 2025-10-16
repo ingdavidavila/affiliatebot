@@ -7,6 +7,7 @@ const cors = require('cors');
 const { google } = require('googleapis');
 const { OAuth2Client } = require('google-auth-library');
 const stripe = require('stripe')(process.env.STRIPE_SECRET_KEY);
+const path = require('path'); // Added for serving static files
 
 const app = express();
 app.use(cors());
@@ -15,18 +16,17 @@ app.use(express.raw({ type: 'application/json' })); // For Stripe webhooks
 
 // ---------------- PostgreSQL ----------------
 const pool = new Pool({
-  user: 'postgres',
-  host: 'localhost',
-  database: 'affiliatebot',
-  password: process.env.POSTGRES_PASSWORD,
-  port: 5432,
+  connectionString: process.env.DATABASE_URL, // Use Heroku's DATABASE_URL
+  ssl: {
+    rejectUnauthorized: false, // Required for Heroku Postgres SSL
+  },
 });
 
 // ---------------- Google OAuth ----------------
 const oauth2Client = new google.auth.OAuth2(
   process.env.GOOGLE_CLIENT_ID,
   process.env.GOOGLE_CLIENT_SECRET,
-  'http://localhost:3001/api/auth/google/callback'
+  'https://www.affiliatesbot.com/api/auth/google/callback' // Updated to production domain
 );
 
 app.post('/api/auth/google', async (req, res) => {
@@ -171,8 +171,8 @@ app.post('/api/create-checkout-session', async (req, res) => {
           quantity: 1,
         },
       ],
-      success_url: 'http://localhost:3000/success?session_id={CHECKOUT_SESSION_ID}',
-      cancel_url: 'http://localhost:3000/cancel',
+      success_url: 'https://www.affiliatesbot.com/success?session_id={CHECKOUT_SESSION_ID}', // Updated to production domain
+      cancel_url: 'https://www.affiliatesbot.com/cancel', // Updated to production domain
     });
     res.json({ sessionId: session.id });
   } catch (err) {
@@ -251,5 +251,11 @@ app.post('/api/verify-payment', async (req, res) => {
   }
 });
 
+// ---------------- Serve Frontend ----------------
+app.use(express.static(path.join(__dirname, '../build'))); // Serve static files from build folder
+app.get('*', (req, res) => {
+  res.sendFile(path.join(__dirname, '../build', 'index.html')); // Catch-all for React routing
+});
+
 // ---------------- Start Server ----------------
-app.listen(3001, () => console.log('✅ AffiliateBot server running on http://localhost:3001'));
+app.listen(process.env.PORT || 3001, () => console.log('✅ AffiliateBot server running on http://localhost:3001 or Heroku port'));
