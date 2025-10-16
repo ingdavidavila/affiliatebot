@@ -24,6 +24,8 @@ function App() {
   const [paid, setPaid] = useState(false);
   const [showChannelPrompt, setShowChannelPrompt] = useState(false);
   const [channelInput, setChannelInput] = useState('');
+  const [currentPage, setCurrentPage] = useState(1); // New state for page
+  const itemsPerPage = 10; // Set to 10 items per page
 
   // ✅ Verify payment on redirect (after user is set)
   useEffect(() => {
@@ -90,6 +92,7 @@ function App() {
       const maxVideos = paid ? -1 : 50; // -1 = check all
       await apiCheckLinks(channelInput, maxVideos, setResults, (msg) => toast.error(msg));
       setShowChannelPrompt(false);
+      setCurrentPage(1); // Reset to first page on new check
       toast.success('Check complete!');
     } catch (err) {
       const message = err.response?.data?.error || 'Failed to check links.';
@@ -115,6 +118,14 @@ function App() {
       setLoading(false);
     }
   };
+
+  // Pagination logic
+  const indexOfLastItem = currentPage * itemsPerPage;
+  const indexOfFirstItem = indexOfLastItem - itemsPerPage;
+  const currentResults = results.slice(indexOfFirstItem, indexOfLastItem);
+  const totalPages = Math.ceil(results.length / itemsPerPage);
+
+  const paginate = (pageNumber) => setCurrentPage(pageNumber);
 
   return (
     <div className="app-wrapper">
@@ -227,7 +238,7 @@ function App() {
                 onMouseOver={(e) => (e.target.style.transform = 'scale(1.05)')}
                 onMouseOut={(e) => (e.target.style.transform = 'scale(1)')}
               >
-                $14.99/month
+                $15/month
               </button>
               <button
                 className="btn btn-success stylish-btn"
@@ -242,13 +253,13 @@ function App() {
                 onMouseOver={(e) => (e.target.style.transform = 'scale(1.05)')}
                 onMouseOut={(e) => (e.target.style.transform = 'scale(1)')}
               >
-                $99.99/year
+                $100/year
               </button>
               <p className="promise">Coming soon: Automated daily checks will be emailed to you!</p>
             </div>
           )}
 
-          {/* RESULTS TABLE */}
+          {/* RESULTS TABLE WITH PAGINATION */}
           {results.length > 0 && paid && (
             <div className="results-table">
               <table className="table">
@@ -259,7 +270,7 @@ function App() {
                   </tr>
                 </thead>
                 <tbody>
-                  {results.map((result, index) => (
+                  {currentResults.map((result, index) => (
                     <tr key={index}>
                       <td>
                         <a
@@ -286,6 +297,28 @@ function App() {
                   ))}
                 </tbody>
               </table>
+              {/* Pagination Controls */}
+              <div className="pagination" style={{ marginTop: '1rem', textAlign: 'center' }}>
+                <button
+                  className="btn btn-secondary"
+                  onClick={() => paginate(currentPage - 1)}
+                  disabled={currentPage === 1}
+                  style={{ marginRight: '0.5rem' }}
+                >
+                  Previous
+                </button>
+                <span>
+                  Page {currentPage} of {totalPages}
+                </span>
+                <button
+                  className="btn btn-secondary"
+                  onClick={() => paginate(currentPage + 1)}
+                  disabled={currentPage === totalPages}
+                  style={{ marginLeft: '0.5rem' }}
+                >
+                  Next
+                </button>
+              </div>
             </div>
           )}
         </div>
