@@ -1,9 +1,17 @@
 import React, { useState, useEffect } from 'react';
 import { GoogleLogin } from '@react-oauth/google';
-import axios from 'axios';
 import { loadStripe } from '@stripe/stripe-js';
-import { Elements } from '@stripe/react-stripe-js';
+import { ToastContainer, toast } from 'react-toastify';
+import 'react-toastify/dist/ReactToastify.css';
 import './App.css';
+import {
+  verifyPayment,
+  authGoogle,
+  getUserStatus,
+  checkLinks as apiCheckLinks,
+  createCustomer,
+  createCheckoutSession,
+} from './api';
 
 const stripePromise = loadStripe(process.env.REACT_APP_STRIPE_PUBLISHABLE_KEY);
 
@@ -14,67 +22,58 @@ function App() {
   const [showLogin, setShowLogin] = useState(false);
   const [loading, setLoading] = useState(false);
   const [paid, setPaid] = useState(false);
-  const [showChannelPrompt, setShowChannelPrompt] = useState(false); // New state for modal
-  const [channelInput, setChannelInput] = useState(''); // New state for input
+  const [showChannelPrompt, setShowChannelPrompt] = useState(false);
+  const [channelInput, setChannelInput] = useState('');
 
+  // ✅ Verify payment on redirect (after user is set)
   useEffect(() => {
-    console.log('App component mounted');
     const urlParams = new URLSearchParams(window.location.search);
     const sessionId = urlParams.get('session_id');
     if (sessionId) {
-      verifyPayment(sessionId);
+      verifyPayment(
+        sessionId,
+        setLoading,
+        setPaid,
+        setShowChannelPrompt,
+        setChannelInput,
+        user,
+        (msg) => toast.error(msg)
+      );
     }
-  }, []);
-
-  const verifyPayment = async (sessionId) => {
-    setLoading(true);
-    try {
-      const response = await axios.post('http://localhost:3001/api/verify-payment', { sessionId });
-      setPaid(response.data.paid);
-      if (response.data.paid && user) {
-        setShowChannelPrompt(true); // Show modal instead of prompt
-        setChannelInput(user.lastChannelId || ''); // Pre-fill with last ID
-      }
-    } catch (err) {
-      setError('Payment verification failed: ' + err.message);
-    } finally {
-      setLoading(false);
-    }
-  };
+  }, [user]);
 
   const handleLoginSuccess = async (credentialResponse) => {
-    console.log('Login Success - Credential Response:', credentialResponse);
     setLoading(true);
     try {
-      const authResponse = await axios.post('http://localhost:3001/api/auth/google', {
-        token: credentialResponse.credential,
-      });
-      console.log('Auth Response from Backend:', authResponse.data);
-      const userData = authResponse.data.user;
-      setUser({ ...userData, lastChannelId: null }); // Store last used channelId
+      const authResponse = await authGoogle(credentialResponse.credential);
+      const userData = authResponse.data.user || authResponse.data;
+      setUser({ ...userData, lastChannelId: null });
 
-      const statusResponse = await axios.get(`http://localhost:3001/api/user-status?email=${userData.email}`);
-      setPaid(statusResponse.data.paid);
+      const statusResponse = await getUserStatus(userData.email);
+      setPaid(statusResponse.data.paid || false);
 
       setError('');
       setShowLogin(false);
-      setShowChannelPrompt(true); // Show modal instead of prompt
-      setChannelInput(''); // Clear input for new entry
+      setShowChannelPrompt(true);
+      setChannelInput('');
+      toast.success('Logged in successfully!');
     } catch (err) {
-      console.error('Auth Error Details:', {
+      console.error('Auth error details:', {
         message: err.message,
         response: err.response?.data,
         status: err.response?.status,
       });
-      setError(err.response?.data?.error || 'Failed to log in with Google');
+      const message = err.response?.data?.error || 'Failed to log in with Google.';
+      setError(message);
+      toast.error(message);
     } finally {
       setLoading(false);
     }
   };
 
   const handleLoginFailure = () => {
-    console.log('Login Failed');
-    setError('Failed to log in with Google');
+    setError('Failed to log in with Google.');
+    toast.error('Failed to log in with Google.');
     setShowLogin(false);
     setLoading(false);
   };
@@ -82,33 +81,20 @@ function App() {
   const handleChannelSubmit = async () => {
     if (!channelInput.trim()) {
       setError('Channel ID is required to check links.');
+      toast.error('Channel ID is required.');
       return;
     }
     setLoading(true);
     try {
-      setUser(prev => ({ ...prev, lastChannelId: channelInput }));
-      const isPaid = paid || (user && user.lastChannelId && verifyPayment); // Determine paid status contextually
-      await checkLinks(channelInput, isPaid);
-      setShowChannelPrompt(false); // Close modal on success
+      setUser((prev) => ({ ...prev, lastChannelId: channelInput }));
+      const maxVideos = paid ? -1 : 50; // -1 = check all
+      await apiCheckLinks(channelInput, maxVideos, setResults, (msg) => toast.error(msg));
+      setShowChannelPrompt(false);
+      toast.success('Check complete!');
     } catch (err) {
-      setError(err.response?.data?.error || 'Failed to check links');
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  const checkLinks = async (channelId, isPaid) => {
-    setLoading(true);
-    try {
-      const maxVideos = isPaid ? -1 : 50; // -1 signals backend to use total video count
-      const checkResponse = await axios.post('http://localhost:3001/api/check-links', {
-        channelId,
-        maxVideos,
-      });
-      setResults(checkResponse.data.brokenLinks || []);
-      setError('');
-    } catch (err) {
-      setError(err.response?.data?.error || 'Failed to check links');
+      const message = err.response?.data?.error || 'Failed to check links.';
+      setError(message);
+      toast.error(message);
     } finally {
       setLoading(false);
     }
@@ -117,12 +103,14 @@ function App() {
   const handlePayment = async (plan) => {
     setLoading(true);
     try {
-      const { data: { customerId } } = await axios.post('http://localhost:3001/api/create-customer', { email: user.email });
-      const { data: { sessionId } } = await axios.post('http://localhost:3001/api/create-checkout-session', { customerId, plan });
+      const { data: { customerId } } = await createCustomer(user.email);
+      const { data: { sessionId } } = await createCheckoutSession(customerId, plan);
       const stripe = await stripePromise;
       await stripe.redirectToCheckout({ sessionId });
     } catch (err) {
-      setError('Payment initiation failed: ' + err.message);
+      const message = 'Payment initiation failed: ' + err.message;
+      setError(message);
+      toast.error(message);
     } finally {
       setLoading(false);
     }
@@ -130,15 +118,19 @@ function App() {
 
   return (
     <div className="app-wrapper">
+      <ToastContainer position="top-right" autoClose={4000} />
       <div className="container">
         <div className="card">
           <div className="logo-placeholder">
             <div className="logo">AffiliateBot</div>
           </div>
+
           <h1 className="heading">Welcome to AffiliateBot</h1>
           <p className="instructions">
             Click the button below to log in with your YouTube account and check for broken affiliate links in your videos.
           </p>
+
+          {/* LOGIN SECTION */}
           {!user ? (
             <div>
               <button
@@ -148,6 +140,7 @@ function App() {
               >
                 {loading ? 'Logging in...' : 'Log in with YouTube'}
               </button>
+
               {showLogin && (
                 <div className="mt-3">
                   <GoogleLogin
@@ -171,15 +164,22 @@ function App() {
                   setResults([]);
                   setError('');
                   setPaid(false);
+                  toast.info('Logged out.');
                 }}
               >
                 Log Out
               </button>
             </div>
           )}
+
+          {/* STATUS + ERRORS */}
           {loading && <p className="loading">Checking links...</p>}
           {error && <p className="error">{error}</p>}
-          {results.length === 0 && !error && user && <p className="no-results">No broken links found.</p>}
+          {results.length === 0 && !error && user && !loading && (
+            <p className="no-results">No broken links found.</p>
+          )}
+
+          {/* CHANNEL PROMPT */}
           {showChannelPrompt && (
             <div className="channel-prompt">
               <h2 className="heading">Enter Your Channel ID</h2>
@@ -191,37 +191,64 @@ function App() {
                 placeholder="e.g., UC1234567890"
               />
               <p className="channel-help">
-                Don’t know your Channel ID? <a href="https://support.google.com/youtube/answer/3250431" target="_blank" rel="noopener noreferrer">Find it here</a>.
+                Don’t know your Channel ID?{' '}
+                <a
+                  href="https://support.google.com/youtube/answer/3250431"
+                  target="_blank"
+                  rel="noopener noreferrer"
+                >
+                  Find it here
+                </a>.
               </p>
-              <button className="btn btn-primary mt-3" onClick={handleChannelSubmit}>
-                Submit
+              <button
+                className="btn btn-primary mt-3"
+                onClick={handleChannelSubmit}
+                disabled={loading}
+              >
+                {loading ? 'Checking...' : 'Submit'}
               </button>
             </div>
           )}
+
+          {/* PAYWALL */}
           {results.length > 0 && !paid && (
             <div className="paywall">
               <p>{results.length} broken links found. Please subscribe to view details:</p>
               <button
                 className="btn btn-success stylish-btn me-2"
                 onClick={() => handlePayment('monthly')}
-                style={{ padding: '10px 20px', background: 'linear-gradient(45deg, #28a745, #218838)', border: 'none', boxShadow: '0 4px 8px rgba(0,0,0,0.2)', transition: 'all 0.3s' }}
+                style={{
+                  padding: '10px 20px',
+                  background: 'linear-gradient(45deg, #28a745, #218838)',
+                  border: 'none',
+                  boxShadow: '0 4px 8px rgba(0,0,0,0.2)',
+                  transition: 'all 0.3s',
+                }}
                 onMouseOver={(e) => (e.target.style.transform = 'scale(1.05)')}
                 onMouseOut={(e) => (e.target.style.transform = 'scale(1)')}
               >
-                $15/month
+                $14.99/month
               </button>
               <button
                 className="btn btn-success stylish-btn"
                 onClick={() => handlePayment('yearly')}
-                style={{ padding: '10px 20px', background: 'linear-gradient(45deg, #28a745, #218838)', border: 'none', boxShadow: '0 4px 8px rgba(0,0,0,0.2)', transition: 'all 0.3s' }}
+                style={{
+                  padding: '10px 20px',
+                  background: 'linear-gradient(45deg, #28a745, #218838)',
+                  border: 'none',
+                  boxShadow: '0 4px 8px rgba(0,0,0,0.2)',
+                  transition: 'all 0.3s',
+                }}
                 onMouseOver={(e) => (e.target.style.transform = 'scale(1.05)')}
                 onMouseOut={(e) => (e.target.style.transform = 'scale(1)')}
               >
-                $100/year
+                $99.99/year
               </button>
               <p className="promise">Coming soon: Automated daily checks will be emailed to you!</p>
             </div>
           )}
+
+          {/* RESULTS TABLE */}
           {results.length > 0 && paid && (
             <div className="results-table">
               <table className="table">
@@ -262,8 +289,20 @@ function App() {
             </div>
           )}
         </div>
+
+        {/* FOOTER */}
         <footer className="footer bg-dark text-white text-center py-3">
-          <p className="mb-0">This website was made by <a href="https://workingrobotsinc.com" target="_blank" rel="noopener noreferrer" className="text-info">WorkingRobots Inc.</a></p>
+          <p className="mb-0">
+            This website was made by{' '}
+            <a
+              href="https://workingrobotsinc.com"
+              target="_blank"
+              rel="noopener noreferrer"
+              className="text-info"
+            >
+              WorkingRobots Inc.
+            </a>
+          </p>
         </footer>
       </div>
     </div>
