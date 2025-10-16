@@ -1,3 +1,4 @@
+
 /* Import Bootstrap CSS */
 @import url('https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/css/bootstrap.min.css');
 
@@ -192,6 +193,43 @@ body {
   text-decoration: none;
 }
 
+/* Channel prompt modal */
+.channel-prompt {
+  background-color: rgba(255, 255, 255, 0.95);
+  border-radius: 12px;
+  box-shadow: 0 6px 12px rgba(0, 0, 0, 0.15);
+  padding: 2rem;
+  text-align: center;
+  position: relative;
+  z-index: 2000;
+  margin-top: 1rem;
+}
+
+.channel-input {
+  width: 100%;
+  max-width: 300px;
+  padding: 0.5rem;
+  border: 1px solid #ccc;
+  border-radius: 4px;
+  margin-bottom: 1rem;
+  font-size: 1rem;
+}
+
+.channel-help {
+  color: #6B7280;
+  font-size: 0.9rem;
+  margin-top: 1rem;
+}
+
+.channel-help a {
+  color: #3B82F6;
+  text-decoration: underline;
+}
+
+.channel-help a:hover {
+  text-decoration: none;
+}
+
 /* Footer styling */
 .footer {
   flex-shrink: 0;
@@ -200,7 +238,7 @@ body {
   color: #fff;
   text-align: center;
   padding: 1rem 0;
-  position: fixed; /* Changed to fixed for consistent bottom placement */
+  position: fixed;
   bottom: 0;
   left: 0;
   z-index: 1000;

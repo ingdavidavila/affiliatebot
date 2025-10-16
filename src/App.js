@@ -14,6 +14,8 @@ function App() {
   const [showLogin, setShowLogin] = useState(false);
   const [loading, setLoading] = useState(false);
   const [paid, setPaid] = useState(false);
+  const [showChannelPrompt, setShowChannelPrompt] = useState(false); // New state for modal
+  const [channelInput, setChannelInput] = useState(''); // New state for input
 
   useEffect(() => {
     console.log('App component mounted');
@@ -30,10 +32,8 @@ function App() {
       const response = await axios.post('http://localhost:3001/api/verify-payment', { sessionId });
       setPaid(response.data.paid);
       if (response.data.paid && user) {
-        const channelId = prompt('Re-enter your YouTube Channel ID for full check:') || user.lastChannelId;
-        if (channelId) {
-          await checkLinks(channelId, true); // Re-run with all videos
-        }
+        setShowChannelPrompt(true); // Show modal instead of prompt
+        setChannelInput(user.lastChannelId || ''); // Pre-fill with last ID
       }
     } catch (err) {
       setError('Payment verification failed: ' + err.message);
@@ -58,14 +58,8 @@ function App() {
 
       setError('');
       setShowLogin(false);
-
-      const channelId = prompt('Please enter your YouTube Channel ID (e.g., UC1234567890):');
-      if (channelId) {
-        setUser(prev => ({ ...prev, lastChannelId: channelId }));
-        await checkLinks(channelId, statusResponse.data.paid);
-      } else {
-        setError('Channel ID is required to check links.');
-      }
+      setShowChannelPrompt(true); // Show modal instead of prompt
+      setChannelInput(''); // Clear input for new entry
     } catch (err) {
       console.error('Auth Error Details:', {
         message: err.message,
@@ -83,6 +77,24 @@ function App() {
     setError('Failed to log in with Google');
     setShowLogin(false);
     setLoading(false);
+  };
+
+  const handleChannelSubmit = async () => {
+    if (!channelInput.trim()) {
+      setError('Channel ID is required to check links.');
+      return;
+    }
+    setLoading(true);
+    try {
+      setUser(prev => ({ ...prev, lastChannelId: channelInput }));
+      const isPaid = paid || (user && user.lastChannelId && verifyPayment); // Determine paid status contextually
+      await checkLinks(channelInput, isPaid);
+      setShowChannelPrompt(false); // Close modal on success
+    } catch (err) {
+      setError(err.response?.data?.error || 'Failed to check links');
+    } finally {
+      setLoading(false);
+    }
   };
 
   const checkLinks = async (channelId, isPaid) => {
@@ -118,124 +130,142 @@ function App() {
 
   return (
     <div className="app-wrapper">
-    <div className="container">
-      <div className="card">
-        <div className="logo-placeholder">
-          <div className="logo">AffiliateBot</div>
-        </div>
-        <h1 className="heading">Welcome to AffiliateBot</h1>
-        <p className="instructions">
-          Click the button below to log in with your YouTube account and check for broken affiliate links in your videos.
-        </p>
-        {!user ? (
-          <div>
-            <button
-              className="btn btn-primary"
-              onClick={() => setShowLogin(true)}
-              disabled={loading}
-            >
-              {loading ? 'Logging in...' : 'Log in with YouTube'}
-            </button>
-            {showLogin && (
-              <div className="mt-3">
-                <GoogleLogin
-                  onSuccess={handleLoginSuccess}
-                  onError={handleLoginFailure}
-                  scope="https://www.googleapis.com/auth/youtube.readonly"
-                  text="signin_with"
-                  shape="rectangular"
-                  theme="filled_blue"
-                />
-              </div>
-            )}
+      <div className="container">
+        <div className="card">
+          <div className="logo-placeholder">
+            <div className="logo">AffiliateBot</div>
           </div>
-        ) : (
-          <div>
-            <p className="logged-in">Logged in as {user.email}</p>
-            <button
-              className="logout-btn"
-              onClick={() => {
-                setUser(null);
-                setResults([]);
-                setError('');
-                setPaid(false);
-              }}
-            >
-              Log Out
-            </button>
-          </div>
-        )}
-        {loading && <p className="loading">Checking links...</p>}
-        {error && <p className="error">{error}</p>}
-        {results.length === 0 && !error && user && <p className="no-results">No broken links found.</p>}
-        {results.length > 0 && !paid && (
-          <div className="paywall">
-            <p>{results.length} broken links found. Please subscribe to view details:</p>
-            <button
-              className="btn btn-success stylish-btn me-2"
-              onClick={() => handlePayment('monthly')}
-              style={{ padding: '10px 20px', background: 'linear-gradient(45deg, #28a745, #218838)', border: 'none', boxShadow: '0 4px 8px rgba(0,0,0,0.2)', transition: 'all 0.3s' }}
-              onMouseOver={(e) => (e.target.style.transform = 'scale(1.05)')}
-              onMouseOut={(e) => (e.target.style.transform = 'scale(1)')}
-            >
-              $15/month
-            </button>
-            <button
-              className="btn btn-success stylish-btn"
-              onClick={() => handlePayment('yearly')}
-              style={{ padding: '10px 20px', background: 'linear-gradient(45deg, #28a745, #218838)', border: 'none', boxShadow: '0 4px 8px rgba(0,0,0,0.2)', transition: 'all 0.3s' }}
-              onMouseOver={(e) => (e.target.style.transform = 'scale(1.05)')}
-              onMouseOut={(e) => (e.target.style.transform = 'scale(1)')}
-            >
-              $100/year
-            </button>
-            <p className="promise">Coming soon: Automated daily checks will be emailed to you!</p>
-          </div>
-        )}
-        {results.length > 0 && paid && (
-          <div className="results-table">
-            <table className="table">
-              <thead>
-                <tr>
-                  <th>Video URL</th>
-                  <th>Broken Link</th>
-                </tr>
-              </thead>
-              <tbody>
-                {results.map((result, index) => (
-                  <tr key={index}>
-                    <td>
-                      <a
-                        href={`https://www.youtube.com/watch?v=${result.videoId}`}
-                        target="_blank"
-                        rel="noopener noreferrer"
-                        className="table-link"
-                      >
-                        Watch Video
-                      </a>
-                    </td>
-                    <td>
-                      <a
-                        href={result.link}
-                        target="_blank"
-                        rel="noopener noreferrer"
-                        className="table-link"
-                        style={{ wordBreak: 'break-all' }}
-                      >
-                        {result.link}
-                      </a>
-                    </td>
+          <h1 className="heading">Welcome to AffiliateBot</h1>
+          <p className="instructions">
+            Click the button below to log in with your YouTube account and check for broken affiliate links in your videos.
+          </p>
+          {!user ? (
+            <div>
+              <button
+                className="btn btn-primary"
+                onClick={() => setShowLogin(true)}
+                disabled={loading}
+              >
+                {loading ? 'Logging in...' : 'Log in with YouTube'}
+              </button>
+              {showLogin && (
+                <div className="mt-3">
+                  <GoogleLogin
+                    onSuccess={handleLoginSuccess}
+                    onError={handleLoginFailure}
+                    scope="https://www.googleapis.com/auth/youtube.readonly"
+                    text="signin_with"
+                    shape="rectangular"
+                    theme="filled_blue"
+                  />
+                </div>
+              )}
+            </div>
+          ) : (
+            <div>
+              <p className="logged-in">Logged in as {user.email}</p>
+              <button
+                className="logout-btn"
+                onClick={() => {
+                  setUser(null);
+                  setResults([]);
+                  setError('');
+                  setPaid(false);
+                }}
+              >
+                Log Out
+              </button>
+            </div>
+          )}
+          {loading && <p className="loading">Checking links...</p>}
+          {error && <p className="error">{error}</p>}
+          {results.length === 0 && !error && user && <p className="no-results">No broken links found.</p>}
+          {showChannelPrompt && (
+            <div className="channel-prompt">
+              <h2 className="heading">Enter Your Channel ID</h2>
+              <input
+                type="text"
+                className="channel-input"
+                value={channelInput}
+                onChange={(e) => setChannelInput(e.target.value)}
+                placeholder="e.g., UC1234567890"
+              />
+              <p className="channel-help">
+                Don’t know your Channel ID? <a href="https://support.google.com/youtube/answer/3250431" target="_blank" rel="noopener noreferrer">Find it here</a>.
+              </p>
+              <button className="btn btn-primary mt-3" onClick={handleChannelSubmit}>
+                Submit
+              </button>
+            </div>
+          )}
+          {results.length > 0 && !paid && (
+            <div className="paywall">
+              <p>{results.length} broken links found. Please subscribe to view details:</p>
+              <button
+                className="btn btn-success stylish-btn me-2"
+                onClick={() => handlePayment('monthly')}
+                style={{ padding: '10px 20px', background: 'linear-gradient(45deg, #28a745, #218838)', border: 'none', boxShadow: '0 4px 8px rgba(0,0,0,0.2)', transition: 'all 0.3s' }}
+                onMouseOver={(e) => (e.target.style.transform = 'scale(1.05)')}
+                onMouseOut={(e) => (e.target.style.transform = 'scale(1)')}
+              >
+                $15/month
+              </button>
+              <button
+                className="btn btn-success stylish-btn"
+                onClick={() => handlePayment('yearly')}
+                style={{ padding: '10px 20px', background: 'linear-gradient(45deg, #28a745, #218838)', border: 'none', boxShadow: '0 4px 8px rgba(0,0,0,0.2)', transition: 'all 0.3s' }}
+                onMouseOver={(e) => (e.target.style.transform = 'scale(1.05)')}
+                onMouseOut={(e) => (e.target.style.transform = 'scale(1)')}
+              >
+                $100/year
+              </button>
+              <p className="promise">Coming soon: Automated daily checks will be emailed to you!</p>
+            </div>
+          )}
+          {results.length > 0 && paid && (
+            <div className="results-table">
+              <table className="table">
+                <thead>
+                  <tr>
+                    <th>Video URL</th>
+                    <th>Broken Link</th>
                   </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        )}
-      </div>
+                </thead>
+                <tbody>
+                  {results.map((result, index) => (
+                    <tr key={index}>
+                      <td>
+                        <a
+                          href={`https://www.youtube.com/watch?v=${result.videoId}`}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="table-link"
+                        >
+                          Watch Video
+                        </a>
+                      </td>
+                      <td>
+                        <a
+                          href={result.link}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="table-link"
+                          style={{ wordBreak: 'break-all' }}
+                        >
+                          {result.link}
+                        </a>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+        </div>
         <footer className="footer bg-dark text-white text-center py-3">
           <p className="mb-0">This website was made by <a href="https://workingrobotsinc.com" target="_blank" rel="noopener noreferrer" className="text-info">WorkingRobots Inc.</a></p>
         </footer>
-    </div>
+      </div>
     </div>
   );
 }
