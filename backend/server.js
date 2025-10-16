@@ -11,8 +11,9 @@ const stripe = require('stripe')(process.env.STRIPE_SECRET_KEY);
 const app = express();
 app.use(cors());
 app.use(express.json());
-app.use(express.raw({ type: 'application/json' })); // For webhook
+app.use(express.raw({ type: 'application/json' })); // For Stripe webhooks
 
+// ---------------- PostgreSQL ----------------
 const pool = new Pool({
   user: 'postgres',
   host: 'localhost',
@@ -21,6 +22,7 @@ const pool = new Pool({
   port: 5432,
 });
 
+// ---------------- Google OAuth ----------------
 const oauth2Client = new google.auth.OAuth2(
   process.env.GOOGLE_CLIENT_ID,
   process.env.GOOGLE_CLIENT_SECRET,
@@ -29,9 +31,7 @@ const oauth2Client = new google.auth.OAuth2(
 
 app.post('/api/auth/google', async (req, res) => {
   const { token } = req.body;
-  if (!token) {
-    return res.status(400).json({ error: 'Missing token' });
-  }
+  if (!token) return res.status(400).json({ error: 'Missing token' });
 
   try {
     const client = new OAuth2Client(process.env.GOOGLE_CLIENT_ID);
@@ -44,11 +44,7 @@ app.post('/api/auth/google', async (req, res) => {
     const email = payload.email;
     const sub = payload.sub;
 
-    const user = {
-      email: email || 'unknown',
-      sub: sub,
-    };
-
+    const user = { email, sub };
     res.json({ user });
   } catch (err) {
     console.error('OAuth Error:', err.message);
@@ -56,6 +52,28 @@ app.post('/api/auth/google', async (req, res) => {
   }
 });
 
+// ---------------- YouTube Video Count ----------------
+async function getTotalVideoCount(channelId) {
+  const youtube = google.youtube({
+    version: 'v3',
+    auth: process.env.YOUTUBE_API_KEY,
+  });
+  try {
+    const response = await youtube.channels.list({
+      part: 'statistics',
+      id: channelId,
+    });
+    if (response.data.items.length > 0) {
+      return parseInt(response.data.items[0].statistics.videoCount, 10) || 50;
+    }
+    return 50;
+  } catch (err) {
+    console.error('Error fetching video count:', err.message);
+    return 50;
+  }
+}
+
+// ---------------- Broken Link Checker ----------------
 app.post('/api/check-links', async (req, res) => {
   const { channelId, maxVideos } = req.body;
   if (!channelId) {
@@ -64,51 +82,46 @@ app.post('/api/check-links', async (req, res) => {
 
   try {
     console.log(`Spawning Python with channelId: ${channelId}, maxVideos: ${maxVideos}`);
-    let effectiveMaxVideos = maxVideos === -1 ? await getTotalVideoCount(channelId) : maxVideos;
+    const effectiveMaxVideos = maxVideos === -1 ? await getTotalVideoCount(channelId) : maxVideos;
 
     const python = spawn('python', ['check_links.py', channelId, effectiveMaxVideos], {
       env: { ...process.env, YOUTUBE_API_KEY: process.env.YOUTUBE_API_KEY },
     });
-    let output = '';
-    let errorOutput = '';
+
+    let stdoutData = '';
+    let stderrData = '';
 
     python.stdout.on('data', (data) => {
-      output += data.toString();
-      console.log(`Python stdout: ${data}`);
+      stdoutData += data.toString();
     });
 
     python.stderr.on('data', (data) => {
-      errorOutput += data.toString();
-      console.log(`Python stderr: ${data}`);
+      stderrData += data.toString();
+      console.error(`[PYTHON STDERR]: ${data}`);
     });
 
     python.on('close', async (code) => {
       console.log(`Python process exited with code ${code}`);
       if (code !== 0) {
-        return res.status(500).json({ error: `AffiliateBot script failed: ${errorOutput}` });
+        return res.status(500).json({ error: `Python script failed`, details: stderrData });
       }
 
-      const brokenLinks = [];
-      const lines = output.split('\n');
-      let currentVideoId = null;
-      for (const line of lines) {
-        if (line.startsWith('Video: https://www.youtube.com/watch?v=')) {
-          currentVideoId = line.split('v=')[1].split('\n')[0];
-        } else if (line.startsWith('Broken link: ')) {
-          const link = line.replace('Broken link: ', '').trim();
-          brokenLinks.push({ videoId: currentVideoId, link });
-          try {
-            await pool.query(
-              'INSERT INTO broken_links (channel_id, video_id, broken_link, checked_at) VALUES ($1, $2, $3, NOW())',
-              [channelId, currentVideoId, link]
-            );
-            console.log(`Inserted: channelId=${channelId}, videoId=${currentVideoId}, link=${link}`);
-          } catch (dbErr) {
-            console.error(`Database error: ${dbErr.message}`);
-          }
-        }
+      let parsed;
+      try {
+        parsed = JSON.parse(stdoutData);
+      } catch (err) {
+        console.error("❌ Failed to parse Python JSON output:", err);
+        console.error("Raw output:", stdoutData);
+
+        // Fallback: Query database for recent broken links
+        const dbResult = await pool.query(
+          'SELECT video_id AS videoId, broken_link AS link FROM broken_links WHERE channel_id = $1 ORDER BY checked_at DESC LIMIT 10',
+          [channelId]
+        );
+        parsed = { brokenLinks: dbResult.rows };
       }
 
+      const brokenLinks = parsed.brokenLinks || [];
       res.json({ brokenLinks });
     });
   } catch (err) {
@@ -116,39 +129,28 @@ app.post('/api/check-links', async (req, res) => {
   }
 });
 
-async function getTotalVideoCount(channelId) {
-  const youtube = google.youtube({
-    version: 'v3',
-    auth: process.env.YOUTUBE_API_KEY, // Using API key for simplicity
-  });
-  try {
-    const response = await youtube.channels.list({
-      part: 'statistics',
-      id: channelId,
-    });
-    if (response.data.items.length > 0) {
-      return parseInt(response.data.items[0].statistics.videoCount, 10) || 50; // Default to 50 if invalid
-    }
-    return 50; // Fallback if channel not found
-  } catch (err) {
-    console.error('Error fetching video count:', err.message);
-    return 50; // Fallback
-  }
-}
-
+// ---------------- Stripe Integration ----------------
 app.post('/api/create-customer', async (req, res) => {
   const { email } = req.body;
   try {
     let customer = await stripe.customers.list({ email, limit: 1 });
     if (customer.data.length === 0) {
       customer = await stripe.customers.create({ email });
+    } else {
+      customer = customer.data[0];
     }
+
     await pool.query(
-      'INSERT INTO users (email, stripe_customer_id) VALUES ($1, $2) ON CONFLICT (email) DO UPDATE SET stripe_customer_id = $2',
+      `INSERT INTO users (email, stripe_customer_id)
+       VALUES ($1, $2)
+       ON CONFLICT (email)
+       DO UPDATE SET stripe_customer_id = EXCLUDED.stripe_customer_id`,
       [email, customer.id]
     );
+
     res.json({ customerId: customer.id });
   } catch (err) {
+    console.error('Stripe create-customer error:', err.message);
     res.status(500).json({ error: err.message });
   }
 });
@@ -162,7 +164,10 @@ app.post('/api/create-checkout-session', async (req, res) => {
       mode: 'subscription',
       line_items: [
         {
-          price: plan === 'monthly' ? process.env.STRIPE_MONTHLY_PRICE_ID : process.env.STRIPE_YEARLY_PRICE_ID,
+          price:
+            plan === 'monthly'
+              ? process.env.STRIPE_MONTHLY_PRICE_ID
+              : process.env.STRIPE_YEARLY_PRICE_ID,
           quantity: 1,
         },
       ],
@@ -171,6 +176,7 @@ app.post('/api/create-checkout-session', async (req, res) => {
     });
     res.json({ sessionId: session.id });
   } catch (err) {
+    console.error('Stripe checkout error:', err.message);
     res.status(500).json({ error: err.message });
   }
 });
@@ -178,19 +184,39 @@ app.post('/api/create-checkout-session', async (req, res) => {
 app.post('/api/webhook', async (req, res) => {
   const sig = req.headers['stripe-signature'];
   try {
-    const event = stripe.webhooks.constructEvent(req.body, sig, process.env.STRIPE_WEBHOOK_SECRET);
+    const event = stripe.webhooks.constructEvent(
+      req.body,
+      sig,
+      process.env.STRIPE_WEBHOOK_SECRET
+    );
+
     if (event.type === 'checkout.session.completed') {
       const session = event.data.object;
-      const userId = (await pool.query('SELECT id FROM users WHERE stripe_customer_id = $1', [session.customer])).rows[0]?.id;
+      const userResult = await pool.query(
+        'SELECT id FROM users WHERE stripe_customer_id = $1',
+        [session.customer]
+      );
+      const userId = userResult.rows[0]?.id;
+
       if (userId) {
         await pool.query(
-          'INSERT INTO subscriptions (user_id, stripe_subscription_id, plan_type, status) VALUES ($1, $2, $3, $4) ON CONFLICT (stripe_subscription_id) DO UPDATE SET status = $4',
-          [userId, session.subscription, session.metadata.plan || req.body.plan, 'active']
+          `INSERT INTO subscriptions (user_id, stripe_subscription_id, plan_type, status)
+           VALUES ($1, $2, $3, $4)
+           ON CONFLICT (stripe_subscription_id)
+           DO UPDATE SET status = EXCLUDED.status`,
+          [
+            userId,
+            session.subscription,
+            session.metadata?.plan || 'unknown',
+            'active',
+          ]
         );
       }
     }
+
     res.json({ received: true });
   } catch (err) {
+    console.error('Webhook error:', err.message);
     res.status(400).json({ error: err.message });
   }
 });
@@ -198,9 +224,18 @@ app.post('/api/webhook', async (req, res) => {
 app.get('/api/user-status', async (req, res) => {
   const { email } = req.query;
   try {
-    const result = await pool.query('SELECT EXISTS (SELECT 1 FROM subscriptions WHERE user_id = (SELECT id FROM users WHERE email = $1) AND status = $2) AS paid', [email, 'active']);
+    const result = await pool.query(
+      `SELECT EXISTS (
+         SELECT 1
+         FROM subscriptions
+         WHERE user_id = (SELECT id FROM users WHERE email = $1)
+         AND status = 'active'
+       ) AS paid`,
+      [email]
+    );
     res.json({ paid: result.rows[0].paid });
   } catch (err) {
+    console.error('User status error:', err.message);
     res.status(500).json({ error: err.message });
   }
 });
@@ -211,8 +246,10 @@ app.post('/api/verify-payment', async (req, res) => {
     const session = await stripe.checkout.sessions.retrieve(sessionId);
     res.json({ paid: session.payment_status === 'paid' });
   } catch (err) {
+    console.error('Verify payment error:', err.message);
     res.status(500).json({ error: err.message });
   }
 });
 
-app.listen(3001, () => console.log('AffiliateBot server running on http://localhost:3001'));
+// ---------------- Start Server ----------------
+app.listen(3001, () => console.log('✅ AffiliateBot server running on http://localhost:3001'));
