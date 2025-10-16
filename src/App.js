@@ -1,7 +1,11 @@
 import React, { useState, useEffect } from 'react';
 import { GoogleLogin } from '@react-oauth/google';
 import axios from 'axios';
+import { loadStripe } from '@stripe/stripe-js';
+import { Elements } from '@stripe/react-stripe-js';
 import './App.css';
+
+const stripePromise = loadStripe(process.env.REACT_APP_STRIPE_PUBLISHABLE_KEY);
 
 function App() {
   const [user, setUser] = useState(null);
@@ -9,41 +13,70 @@ function App() {
   const [results, setResults] = useState([]);
   const [showLogin, setShowLogin] = useState(false);
   const [loading, setLoading] = useState(false);
+  const [paid, setPaid] = useState(false);
 
   useEffect(() => {
     console.log('App component mounted');
+    const urlParams = new URLSearchParams(window.location.search);
+    const sessionId = urlParams.get('session_id');
+    if (sessionId) {
+      verifyPayment(sessionId);
+    }
   }, []);
 
- const handleLoginSuccess = async (credentialResponse) => {
-  console.log('Login Success - Credential Response:', credentialResponse);
-  setLoading(true);
-  try {
-    const authResponse = await axios.post('http://localhost:3001/api/auth/google', {
-      token: credentialResponse.credential,
-    });
-    console.log('Auth Response from Backend:', authResponse.data);
-    setUser(authResponse.data.user);
-    setError('');
-    setShowLogin(false);
-
-    // Temporary: Use a placeholder or prompt for channelId
-    const channelId = prompt('Please enter your YouTube Channel ID (e.g., UC1234567890):');
-    if (channelId) {
-      await checkLinks(channelId);
-    } else {
-      setError('Channel ID is required to check links.');
+  const verifyPayment = async (sessionId) => {
+    setLoading(true);
+    try {
+      const response = await axios.post('http://localhost:3001/api/verify-payment', { sessionId });
+      setPaid(response.data.paid);
+      if (response.data.paid && user) {
+        const channelId = prompt('Re-enter your YouTube Channel ID for full check:') || user.lastChannelId;
+        if (channelId) {
+          await checkLinks(channelId, true); // Re-run with all videos
+        }
+      }
+    } catch (err) {
+      setError('Payment verification failed: ' + err.message);
+    } finally {
+      setLoading(false);
     }
-  } catch (err) {
-    console.error('Auth Error Details:', {
-      message: err.message,
-      response: err.response?.data,
-      status: err.response?.status,
-    });
-    setError(err.response?.data?.error || 'Failed to log in with Google');
-  } finally {
-    setLoading(false);
-  }
-};
+  };
+
+  const handleLoginSuccess = async (credentialResponse) => {
+    console.log('Login Success - Credential Response:', credentialResponse);
+    setLoading(true);
+    try {
+      const authResponse = await axios.post('http://localhost:3001/api/auth/google', {
+        token: credentialResponse.credential,
+      });
+      console.log('Auth Response from Backend:', authResponse.data);
+      const userData = authResponse.data.user;
+      setUser({ ...userData, lastChannelId: null }); // Store last used channelId
+
+      const statusResponse = await axios.get(`http://localhost:3001/api/user-status?email=${userData.email}`);
+      setPaid(statusResponse.data.paid);
+
+      setError('');
+      setShowLogin(false);
+
+      const channelId = prompt('Please enter your YouTube Channel ID (e.g., UC1234567890):');
+      if (channelId) {
+        setUser(prev => ({ ...prev, lastChannelId: channelId }));
+        await checkLinks(channelId, statusResponse.data.paid);
+      } else {
+        setError('Channel ID is required to check links.');
+      }
+    } catch (err) {
+      console.error('Auth Error Details:', {
+        message: err.message,
+        response: err.response?.data,
+        status: err.response?.status,
+      });
+      setError(err.response?.data?.error || 'Failed to log in with Google');
+    } finally {
+      setLoading(false);
+    }
+  };
 
   const handleLoginFailure = () => {
     console.log('Login Failed');
@@ -52,12 +85,13 @@ function App() {
     setLoading(false);
   };
 
-  const checkLinks = async (channelId) => {
+  const checkLinks = async (channelId, isPaid) => {
     setLoading(true);
     try {
+      const maxVideos = isPaid ? -1 : 50; // -1 signals backend to use total video count
       const checkResponse = await axios.post('http://localhost:3001/api/check-links', {
         channelId,
-        maxVideos: 50,
+        maxVideos,
       });
       setResults(checkResponse.data.brokenLinks || []);
       setError('');
@@ -68,7 +102,22 @@ function App() {
     }
   };
 
+  const handlePayment = async (plan) => {
+    setLoading(true);
+    try {
+      const { data: { customerId } } = await axios.post('http://localhost:3001/api/create-customer', { email: user.email });
+      const { data: { sessionId } } = await axios.post('http://localhost:3001/api/create-checkout-session', { customerId, plan });
+      const stripe = await stripePromise;
+      await stripe.redirectToCheckout({ sessionId });
+    } catch (err) {
+      setError('Payment initiation failed: ' + err.message);
+    } finally {
+      setLoading(false);
+    }
+  };
+
   return (
+    <div className="app-wrapper">
     <div className="container">
       <div className="card">
         <div className="logo-placeholder">
@@ -109,6 +158,7 @@ function App() {
                 setUser(null);
                 setResults([]);
                 setError('');
+                setPaid(false);
               }}
             >
               Log Out
@@ -117,7 +167,32 @@ function App() {
         )}
         {loading && <p className="loading">Checking links...</p>}
         {error && <p className="error">{error}</p>}
-        {results.length > 0 ? (
+        {results.length === 0 && !error && user && <p className="no-results">No broken links found.</p>}
+        {results.length > 0 && !paid && (
+          <div className="paywall">
+            <p>{results.length} broken links found. Please subscribe to view details:</p>
+            <button
+              className="btn btn-success stylish-btn me-2"
+              onClick={() => handlePayment('monthly')}
+              style={{ padding: '10px 20px', background: 'linear-gradient(45deg, #28a745, #218838)', border: 'none', boxShadow: '0 4px 8px rgba(0,0,0,0.2)', transition: 'all 0.3s' }}
+              onMouseOver={(e) => (e.target.style.transform = 'scale(1.05)')}
+              onMouseOut={(e) => (e.target.style.transform = 'scale(1)')}
+            >
+              $15/month
+            </button>
+            <button
+              className="btn btn-success stylish-btn"
+              onClick={() => handlePayment('yearly')}
+              style={{ padding: '10px 20px', background: 'linear-gradient(45deg, #28a745, #218838)', border: 'none', boxShadow: '0 4px 8px rgba(0,0,0,0.2)', transition: 'all 0.3s' }}
+              onMouseOver={(e) => (e.target.style.transform = 'scale(1.05)')}
+              onMouseOut={(e) => (e.target.style.transform = 'scale(1)')}
+            >
+              $100/year
+            </button>
+            <p className="promise">Coming soon: Automated daily checks will be emailed to you!</p>
+          </div>
+        )}
+        {results.length > 0 && paid && (
           <div className="results-table">
             <table className="table">
               <thead>
@@ -134,7 +209,7 @@ function App() {
                         href={`https://www.youtube.com/watch?v=${result.videoId}`}
                         target="_blank"
                         rel="noopener noreferrer"
-                        className="table a"
+                        className="table-link"
                       >
                         Watch Video
                       </a>
@@ -144,7 +219,7 @@ function App() {
                         href={result.link}
                         target="_blank"
                         rel="noopener noreferrer"
-                        className="table a"
+                        className="table-link"
                         style={{ wordBreak: 'break-all' }}
                       >
                         {result.link}
@@ -155,10 +230,12 @@ function App() {
               </tbody>
             </table>
           </div>
-        ) : (
-          !error && user && <p className="no-results">No broken links found.</p>
         )}
       </div>
+        <footer className="footer bg-dark text-white text-center py-3">
+          <p className="mb-0">This website was made by <a href="https://workingrobotsinc.com" target="_blank" rel="noopener noreferrer" className="text-info">WorkingRobots Inc.</a></p>
+        </footer>
+    </div>
     </div>
   );
 }
