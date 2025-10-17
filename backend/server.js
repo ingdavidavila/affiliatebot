@@ -9,7 +9,6 @@ const { google } = require('googleapis');
 const { OAuth2Client } = require('google-auth-library');
 const stripe = require('stripe')(process.env.STRIPE_SECRET_KEY);
 const path = require('path'); // Added for serving static files
-const { spawn } = require('child_process');
 const { v4: uuidv4 } = require('uuid');
 
 const app = express();
