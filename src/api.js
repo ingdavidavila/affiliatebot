@@ -12,6 +12,7 @@ const api = axios.create({
   headers: {
     'Content-Type': 'application/json',
   },
+  timeout: 35000, // 35 seconds, slightly above Heroku's 30s H12 limit
 });
 
 // --- API functions ---
@@ -82,11 +83,14 @@ export const checkLinks = async (channelId, maxVideos, setResults, toastError) =
   try {
     const response = await api.post('/check-links', { channelId, maxVideos });
     const brokenLinks = response.data.brokenLinks || [];
-    setResults(brokenLinks);
+    if (setResults) setResults(brokenLinks);
     return response;
   } catch (err) {
-    toastError('Something went wrong while checking your links. Please try again.');
-    throw err;
+    const errorMessage = err.code === 'ECONNABORTED'
+      ? 'Request timed out, task may still be running.'
+      : err.response?.data?.error || 'Something went wrong while checking your links. Please try again.';
+    if (toastError) toastError(errorMessage);
+    throw err; // Re-throw with full details for handleChannelSubmit
   }
 };
 

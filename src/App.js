@@ -81,27 +81,54 @@ function App() {
   };
 
   const handleChannelSubmit = async () => {
-    if (!channelInput.trim()) {
-      setError('Channel ID is required to check links.');
-      toast.error('Channel ID is required.');
-      return;
+  if (!channelInput.trim()) {
+    setError('Channel ID is required to check links.');
+    toast.error('Channel ID is required.');
+    return;
+  }
+  setLoading(true);
+  const maxRetries = 3; // Number of retry attempts
+  const retryDelay = 5000; // 5-second delay between retries
+  let attempt = 0;
+
+  try {
+    setUser((prev) => ({ ...prev, lastChannelId: channelInput }));
+    const maxVideos = paid ? -1 : 50; // Original logic
+    let results;
+    while (attempt < maxRetries) {
+      try {
+        results = await apiCheckLinks(channelInput, maxVideos, setResults, (msg) => toast.error(msg));
+        setResults(results);
+        setShowChannelPrompt(false);
+        setCurrentPage(1); // Reset to first page on new check
+        toast.success('Check complete!');
+        break; // Exit loop on success
+      } catch (err) {
+        attempt++;
+        if (err.code === 'ECONNABORTED' || err.response?.status === 503) {
+          // Timeout or H12 detected, wait and retry
+          if (attempt === maxRetries) {
+            throw new Error('Check timed out after retries.');
+          }
+          console.log(`Attempt ${attempt} failed with timeout, retrying in ${retryDelay}ms...`);
+          await new Promise(resolve => setTimeout(resolve, retryDelay));
+        } else {
+          // Other errors (e.g., 400, 500) should fail immediately
+          throw err;
+        }
+      }
     }
-    setLoading(true);
-    try {
-      setUser((prev) => ({ ...prev, lastChannelId: channelInput }));
-      const maxVideos = paid ? -1 : 50; // -1 = check all
-      await apiCheckLinks(channelInput, maxVideos, setResults, (msg) => toast.error(msg));
-      setShowChannelPrompt(false);
-      setCurrentPage(1); // Reset to first page on new check
-      toast.success('Check complete!');
-    } catch (err) {
-      const message = err.response?.data?.error || 'Failed to check links.';
-      setError(message);
-      toast.error(message);
-    } finally {
-      setLoading(false);
+    if (!results) {
+      throw new Error('No results received after retries.');
     }
-  };
+  } catch (err) {
+    const message = err.message || 'Failed to check links.';
+    setError(message);
+    toast.error(message);
+  } finally {
+    setLoading(false);
+  }
+};
 
   const handlePayment = async (plan) => {
     setLoading(true);
