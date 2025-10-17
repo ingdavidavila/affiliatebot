@@ -9,11 +9,15 @@ const { google } = require('googleapis');
 const { OAuth2Client } = require('google-auth-library');
 const stripe = require('stripe')(process.env.STRIPE_SECRET_KEY);
 const path = require('path'); // Added for serving static files
+const { spawn } = require('child_process');
+const { v4: uuidv4 } = require('uuid');
 
 const app = express();
 app.use(cors());
 app.use(express.json());
 app.use(express.raw({ type: 'application/json' })); // For Stripe webhooks
+
+const jobs = {}; // temporary in-memory job tracker
 
 const allowedOrigins = [
   'https://www.affiliatesbot.com',
@@ -110,81 +114,38 @@ async function getTotalVideoCount(channelId) {
 }
 
 // ---------------- Broken Link Checker ----------------
-app.post('/api/check-links', async (req, res) => {
+app.post('/api/check-links', (req, res) => {
   const { channelId, maxVideos } = req.body;
-  if (!channelId) {
-    return res.status(400).json({ error: 'Missing channelId' });
-  }
+  const jobId = uuidv4();
 
-  try {
-    console.log(`Spawning Python with channelId: ${channelId}, maxVideos: ${maxVideos}`);
-    const effectiveMaxVideos = maxVideos === -1 ? await getTotalVideoCount(channelId) : maxVideos;
+  jobs[jobId] = { status: 'running', result: null };
 
-    const python = spawn('python3', ['check_links.py', channelId, effectiveMaxVideos.toString()], {
-      env: { ...process.env, YOUTUBE_API_KEY: process.env.YOUTUBE_API_KEY },
-    });
+  const python = spawn('python3', ['check_links.py', channelId, maxVideos]);
 
-    let stdoutData = '';
-    let stderrData = '';
+  let output = '';
+  python.stdout.on('data', data => {
+    output += data.toString();
+  });
 
-    python.stdout.on('data', (data) => {
-      stdoutData += data.toString();
-      console.log(`[PYTHON STDOUT]: ${data}`);
-    });
+  python.on('close', code => {
+    try {
+      const parsed = JSON.parse(output);
+      jobs[jobId] = { status: 'completed', result: parsed };
+    } catch (err) {
+      jobs[jobId] = { status: 'error', result: { error: 'Invalid output' } };
+    }
+  });
 
-    python.stderr.on('data', (data) => {
-      stderrData += data.toString();
-      console.error(`[PYTHON STDERR]: ${data}`);
-    });
-
-    python.on('close', async (code) => {
-      console.log(`Python process exited with code ${code}`);
-      if (code !== 0) {
-        return res.status(500).json({ error: `Python script failed`, details: stderrData });
-      }
-
-      let parsed;
-      try {
-        // Split by newline and find the first valid JSON with data
-        const lines = stdoutData.trim().split('\n');
-        for (let i = 0; i < lines.length; i++) {
-          try {
-            const tempParsed = JSON.parse(lines[i]);
-            if (tempParsed.brokenLinks && tempParsed.brokenLinks.length > 0) {
-              parsed = tempParsed;
-              console.log('Parsed JSON with data:', parsed);
-              break;
-            }
-          } catch (e) {
-            continue; // Skip invalid lines
-          }
-        }
-        if (!parsed) {
-          parsed = { brokenLinks: [] }; // Default to empty if no data found
-          console.log('No valid data found, using empty array');
-        }
-      } catch (err) {
-        console.error("❌ Failed to parse Python JSON output:", err);
-        console.error("Raw output:", stdoutData);
-
-        const dbResult = await pool.query(
-          'SELECT video_id AS videoId, broken_link AS link FROM broken_links WHERE channel_id = $1 ORDER BY checked_at DESC LIMIT 10',
-          [channelId]
-        );
-        parsed = { brokenLinks: dbResult.rows };
-      }
-
-      const brokenLinks = parsed.brokenLinks || [];
-      res.json({ brokenLinks, success: true });
-    });
-
-    python.on('error', (err) => {
-      res.status(500).json({ error: 'Failed to spawn Python', details: err.message });
-    });
-  } catch (err) {
-    res.status(500).json({ error: err.message });
-  }
+  res.json({ jobId }); // respond immediately before Heroku timeout
 });
+
+//ads polling status
+app.get('/api/check-links/status/:jobId', (req, res) => {
+  const job = jobs[req.params.jobId];
+  if (!job) return res.status(404).json({ error: 'Job not found' });
+  res.json(job);
+});
+
 
 // ---------------- Stripe Integration ----------------
 app.post('/api/create-customer', async (req, res) => {

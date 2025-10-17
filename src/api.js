@@ -81,16 +81,26 @@ export const getUserStatus = async (email) => {
 
 export const checkLinks = async (channelId, maxVideos, setResults, toastError) => {
   try {
-    const response = await api.post('/check-links', { channelId, maxVideos });
-    const brokenLinks = response.data.brokenLinks || [];
-    if (setResults) setResults(brokenLinks);
-    return response;
+    // Step 1: Start job
+    const { data } = await axios.post(`${process.env.REACT_APP_API_URL}/api/check-links`, {
+      channelId,
+      maxVideos,
+    });
+    const jobId = data.jobId;
+
+    // Step 2: Poll for results
+    const poll = setInterval(async () => {
+      const res = await axios.get(`${process.env.REACT_APP_API_URL}/api/check-links/status/${jobId}`);
+      if (res.data.status === 'completed') {
+        clearInterval(poll);
+        setResults(res.data.result.brokenLinks);
+      } else if (res.data.status === 'error') {
+        clearInterval(poll);
+        toastError('Something went wrong while checking your links.');
+      }
+    }, 3000);
   } catch (err) {
-    const errorMessage = err.code === 'ECONNABORTED'
-      ? 'Request timed out, task may still be running.'
-      : err.response?.data?.error || 'Something went wrong while checking your links. Please try again.';
-    if (toastError) toastError(errorMessage);
-    throw err; // Re-throw with full details for handleChannelSubmit
+    toastError('Unable to start the link check.');
   }
 };
 
