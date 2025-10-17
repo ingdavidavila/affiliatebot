@@ -1,4 +1,5 @@
 require('dotenv').config();
+const fs = require('fs');
 const fetch = require('node-fetch');
 const express = require('express');
 const { spawn } = require('child_process');
@@ -41,6 +42,21 @@ const pool = new Pool({
     rejectUnauthorized: false, // Required for Heroku Postgres SSL
   },
 });
+
+async function initializeDatabase() {
+  try {
+    const schema = fs.readFileSync('schema.sql', 'utf8');
+    await pool.query(schema);
+    console.log('Database schema applied successfully');
+  } catch (err) {
+    console.error('Error applying schema:', err.message);
+    // Ignore "already exists" errors to avoid crashes on redeploy
+    if (!err.message.includes('already exists')) {
+      process.exit(1); // Exit if critical error
+    }
+  }
+}
+
 
 // ---------------- Google OAuth ----------------
 const oauth2Client = new google.auth.OAuth2(
@@ -278,4 +294,8 @@ app.get('*', (req, res) => {
 });
 
 // ---------------- Start Server ----------------
-app.listen(process.env.PORT || 3001, () => console.log('✅ AffiliateBot server running on http://localhost:3001 or Heroku port'));
+initializeDatabase().then(() => {
+  app.listen(process.env.PORT || 3001, () => {
+    console.log('✅ AffiliateBot server running on http://localhost:3001 or Heroku port');
+  });
+});
