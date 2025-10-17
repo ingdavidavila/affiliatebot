@@ -129,6 +129,7 @@ app.post('/api/check-links', async (req, res) => {
 
     python.stdout.on('data', (data) => {
       stdoutData += data.toString();
+      console.log(`[PYTHON STDOUT]: ${data}`);
     });
 
     python.stderr.on('data', (data) => {
@@ -137,29 +138,29 @@ app.post('/api/check-links', async (req, res) => {
     });
 
     python.on('close', async (code) => {
-  console.log(`Python process exited with code ${code}`);
-  if (code !== 0) {
-    return res.status(500).json({ error: `Python script failed`, details: stderrData });
-  }
+      console.log(`Python process exited with code ${code}`);
+      if (code !== 0) {
+        return res.status(500).json({ error: `Python script failed`, details: stderrData });
+      }
 
-  let parsed;
-  try {
-    parsed = JSON.parse(stdoutData);
-  } catch (err) {
-    console.error("❌ Failed to parse Python JSON output:", err);
-    console.error("Raw output:", stdoutData);
+      let parsed;
+      try {
+        parsed = JSON.parse(stdoutData.trim()); // Trim to remove trailing newlines
+        console.log('Parsed JSON:', parsed);
+      } catch (err) {
+        console.error("❌ Failed to parse Python JSON output:", err);
+        console.error("Raw output:", stdoutData);
 
-    // Fallback to database with await
-    const dbResult = await pool.query(
-      'SELECT video_id AS videoId, broken_link AS link FROM broken_links WHERE channel_id = $1 ORDER BY checked_at DESC LIMIT 10',
-      [channelId]
-    );
-    parsed = { brokenLinks: dbResult.rows };
-  }
+        const dbResult = await pool.query(
+          'SELECT video_id AS videoId, broken_link AS link FROM broken_links WHERE channel_id = $1 ORDER BY checked_at DESC LIMIT 10',
+          [channelId]
+        );
+        parsed = { brokenLinks: dbResult.rows };
+      }
 
-  const brokenLinks = parsed.brokenLinks || [];
-  res.json({ brokenLinks });
-});
+      const brokenLinks = parsed.brokenLinks || [];
+      res.json({ brokenLinks });
+    });
 
     python.on('error', (err) => {
       res.status(500).json({ error: 'Failed to spawn Python', details: err.message });
