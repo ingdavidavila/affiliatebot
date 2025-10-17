@@ -120,7 +120,7 @@ app.post('/api/check-links', async (req, res) => {
     console.log(`Spawning Python with channelId: ${channelId}, maxVideos: ${maxVideos}`);
     const effectiveMaxVideos = maxVideos === -1 ? await getTotalVideoCount(channelId) : maxVideos;
 
-    const python = spawn('python', ['check_links.py', channelId, effectiveMaxVideos], {
+    const python = spawn('python3', ['check_links.py', channelId, effectiveMaxVideos.toString()], {
       env: { ...process.env, YOUTUBE_API_KEY: process.env.YOUTUBE_API_KEY },
     });
 
@@ -137,28 +137,32 @@ app.post('/api/check-links', async (req, res) => {
     });
 
     python.on('close', async (code) => {
-      console.log(`Python process exited with code ${code}`);
-      if (code !== 0) {
-        return res.status(500).json({ error: `Python script failed`, details: stderrData });
-      }
+  console.log(`Python process exited with code ${code}`);
+  if (code !== 0) {
+    return res.status(500).json({ error: `Python script failed`, details: stderrData });
+  }
 
-      let parsed;
-      try {
-        parsed = JSON.parse(stdoutData);
-      } catch (err) {
-        console.error("❌ Failed to parse Python JSON output:", err);
-        console.error("Raw output:", stdoutData);
+  let parsed;
+  try {
+    parsed = JSON.parse(stdoutData);
+  } catch (err) {
+    console.error("❌ Failed to parse Python JSON output:", err);
+    console.error("Raw output:", stdoutData);
 
-        // Fallback: Query database for recent broken links
-        const dbResult = await pool.query(
-          'SELECT video_id AS videoId, broken_link AS link FROM broken_links WHERE channel_id = $1 ORDER BY checked_at DESC LIMIT 10',
-          [channelId]
-        );
-        parsed = { brokenLinks: dbResult.rows };
-      }
+    // Fallback to database with await
+    const dbResult = await pool.query(
+      'SELECT video_id AS videoId, broken_link AS link FROM broken_links WHERE channel_id = $1 ORDER BY checked_at DESC LIMIT 10',
+      [channelId]
+    );
+    parsed = { brokenLinks: dbResult.rows };
+  }
 
-      const brokenLinks = parsed.brokenLinks || [];
-      res.json({ brokenLinks });
+  const brokenLinks = parsed.brokenLinks || [];
+  res.json({ brokenLinks });
+});
+
+    python.on('error', (err) => {
+      res.status(500).json({ error: 'Failed to spawn Python', details: err.message });
     });
   } catch (err) {
     res.status(500).json({ error: err.message });
