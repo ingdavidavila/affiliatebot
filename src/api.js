@@ -1,9 +1,33 @@
 import axios from 'axios';
 
-export const verifyPayment = async (sessionId, setLoading, setPaid, setShowChannelPrompt, setChannelInput, user, toastError) => {
+// Automatically use the correct backend URL
+const API_BASE_URL =
+  process.env.NODE_ENV === 'production'
+    ? 'https://www.affiliatesbot.com/api'
+    : 'http://localhost:3001/api';
+
+// Create a preconfigured Axios instance
+const api = axios.create({
+  baseURL: API_BASE_URL,
+  headers: {
+    'Content-Type': 'application/json',
+  },
+});
+
+// --- API functions ---
+
+export const verifyPayment = async (
+  sessionId,
+  setLoading,
+  setPaid,
+  setShowChannelPrompt,
+  setChannelInput,
+  user,
+  toastError
+) => {
   setLoading(true);
   try {
-    const response = await axios.post('http://localhost:3001/api/verify-payment', { sessionId });
+    const response = await api.post('/verify-payment', { sessionId });
     setPaid(response.data.paid);
     if (response.data.paid && user) {
       setShowChannelPrompt(true);
@@ -18,7 +42,7 @@ export const verifyPayment = async (sessionId, setLoading, setPaid, setShowChann
 
 export const authGoogle = async (token) => {
   try {
-    const response = await axios.post('http://localhost:3001/api/auth/google', { token });
+    const response = await api.post('/auth/google', { token });
     if (!response.data.user && !response.data) {
       console.warn('Unexpected auth response structure:', response.data);
       throw new Error('Invalid authentication response from backend');
@@ -37,10 +61,10 @@ export const authGoogle = async (token) => {
 
 export const getUserStatus = async (email) => {
   try {
-    const response = await axios.get(`http://localhost:3001/api/user-status?email=${email}`);
+    const response = await api.get(`/user-status?email=${email}`);
     if (!response.data.paid && response.data.paid !== false) {
       console.warn('Unexpected user status response structure:', response.data);
-      response.data.paid = false; // Default to false if undefined
+      response.data.paid = false;
     }
     return response;
   } catch (err) {
@@ -56,10 +80,10 @@ export const getUserStatus = async (email) => {
 
 export const checkLinks = async (channelId, maxVideos, setResults, toastError) => {
   try {
-    const response = await axios.post('http://localhost:3001/api/check-links', { channelId, maxVideos });
+    const response = await api.post('/check-links', { channelId, maxVideos });
     const brokenLinks = response.data.brokenLinks || [];
-    setResults(brokenLinks); // Directly set the results array
-    return response; // Keep return for potential future use
+    setResults(brokenLinks);
+    return response;
   } catch (err) {
     toastError('Something went wrong while checking your links. Please try again.');
     throw err;
@@ -67,9 +91,9 @@ export const checkLinks = async (channelId, maxVideos, setResults, toastError) =
 };
 
 export const createCustomer = async (email) => {
-  return await axios.post('http://localhost:3001/api/create-customer', { email });
+  return await api.post('/create-customer', { email });
 };
 
 export const createCheckoutSession = async (customerId, plan) => {
-  return await axios.post('http://localhost:3001/api/create-checkout-session', { customerId, plan });
+  return await api.post('/create-checkout-session', { customerId, plan });
 };

@@ -14,6 +14,26 @@ app.use(cors());
 app.use(express.json());
 app.use(express.raw({ type: 'application/json' })); // For Stripe webhooks
 
+const allowedOrigins = [
+  'https://www.affiliatesbot.com',
+  'http://localhost:3000', // for local React dev
+];
+
+app.use(
+  cors({
+    origin: function (origin, callback) {
+      if (!origin || allowedOrigins.includes(origin)) {
+        callback(null, true);
+      } else {
+        callback(new Error('CORS not allowed for this origin'));
+      }
+    },
+    methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
+    allowedHeaders: ['Content-Type', 'Authorization'],
+    credentials: true,
+  })
+);
+
 // ---------------- PostgreSQL ----------------
 const pool = new Pool({
   connectionString: process.env.DATABASE_URL, // Use Heroku's DATABASE_URL
