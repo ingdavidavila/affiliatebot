@@ -145,18 +145,24 @@ app.post('/api/check-links', async (req, res) => {
 
       let parsed;
       try {
-        // Split by newline and parse the last valid JSON
+        // Split by newline and find the first valid JSON with data
         const lines = stdoutData.trim().split('\n');
-        for (let i = lines.length - 1; i >= 0; i--) {
+        for (let i = 0; i < lines.length; i++) {
           try {
-            parsed = JSON.parse(lines[i]);
-            console.log('Parsed JSON:', parsed);
-            break;
+            const tempParsed = JSON.parse(lines[i]);
+            if (tempParsed.brokenLinks && tempParsed.brokenLinks.length > 0) {
+              parsed = tempParsed;
+              console.log('Parsed JSON with data:', parsed);
+              break;
+            }
           } catch (e) {
-            continue; // Try previous line if parsing fails
+            continue; // Skip invalid lines
           }
         }
-        if (!parsed) throw new Error('No valid JSON found');
+        if (!parsed) {
+          parsed = { brokenLinks: [] }; // Default to empty if no data found
+          console.log('No valid data found, using empty array');
+        }
       } catch (err) {
         console.error("❌ Failed to parse Python JSON output:", err);
         console.error("Raw output:", stdoutData);
