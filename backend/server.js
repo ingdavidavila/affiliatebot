@@ -8,7 +8,7 @@ const cors = require('cors');
 const { google } = require('googleapis');
 const { OAuth2Client } = require('google-auth-library');
 const stripe = require('stripe')(process.env.STRIPE_SECRET_KEY);
-const path = require('path');
+const path = require('path'); // Added for serving static files
 
 const app = express();
 app.use(cors());
@@ -45,19 +45,18 @@ const pool = new Pool({
 
 async function initializeDatabase() {
   try {
-    await pool.connect(); // Test connection
     const schema = fs.readFileSync('schema.sql', 'utf8');
     await pool.query(schema);
     console.log('Database schema applied successfully');
   } catch (err) {
-    console.error('Error applying schema or connecting:', err.message);
+    console.error('Error applying schema:', err.message);
+    // Ignore "already exists" errors to avoid crashes on redeploy
     if (!err.message.includes('already exists')) {
-      process.exit(1);
+      process.exit(1); // Exit if critical error
     }
-  } finally {
-    await pool.end(); // Close test connection
   }
 }
+
 
 // ---------------- Google OAuth ----------------
 const oauth2Client = new google.auth.OAuth2(
@@ -110,22 +109,7 @@ async function getTotalVideoCount(channelId) {
   }
 }
 
-// ---------------- Broken Link Checker with Job Tracking ----------------
-async function getOrCreateJob(channelId, maxVideos) {
-  const result = await pool.query(
-    'SELECT id, status FROM jobs WHERE channel_id = $1 AND max_videos = $2 AND status IN (\'pending\', \'in_progress\') ORDER BY created_at DESC LIMIT 1',
-    [channelId, maxVideos]
-  );
-  if (result.rows.length > 0) {
-    return { id: result.rows[0].id, status: result.rows[0].status };
-  }
-  const newJob = await pool.query(
-    'INSERT INTO jobs (channel_id, max_videos, status) VALUES ($1, $2, $3) RETURNING id',
-    [channelId, maxVideos, 'in_progress']
-  );
-  return { id: newJob.rows[0].id, status: 'in_progress' };
-}
-
+// ---------------- Broken Link Checker ----------------
 app.post('/api/check-links', async (req, res) => {
   const { channelId, maxVideos } = req.body;
   if (!channelId) {
@@ -133,13 +117,10 @@ app.post('/api/check-links', async (req, res) => {
   }
 
   try {
-    const job = await getOrCreateJob(channelId, maxVideos);
-    if (job.status === 'in_progress') {
-      return res.json({ jobId: job.id, status: 'in_progress', message: 'Check already in progress' });
-    }
+    console.log(`Spawning Python with channelId: ${channelId}, maxVideos: ${maxVideos}`);
+    const effectiveMaxVideos = maxVideos === -1 ? await getTotalVideoCount(channelId) : maxVideos;
 
-    console.log(`Spawning Python with channelId: ${channelId}, maxVideos: ${maxVideos}, jobId: ${job.id}`);
-    const python = spawn('python3', ['check_links.py', channelId, maxVideos.toString()], {
+    const python = spawn('python3', ['check_links.py', channelId, effectiveMaxVideos.toString()], {
       env: { ...process.env, YOUTUBE_API_KEY: process.env.YOUTUBE_API_KEY },
     });
 
@@ -157,72 +138,49 @@ app.post('/api/check-links', async (req, res) => {
     });
 
     python.on('close', async (code) => {
-      console.log(`Python process exited with code ${code} for jobId: ${job.id}`);
-      if (code === 0) {
-        let parsed;
-        try {
-          const lines = stdoutData.trim().split('\n');
-          for (let i = 0; i < lines.length; i++) {
-            try {
-              const tempParsed = JSON.parse(lines[i]);
-              if (tempParsed.brokenLinks && tempParsed.brokenLinks.length > 0) {
-                parsed = tempParsed;
-                console.log('Parsed JSON with data:', parsed);
-                break;
-              }
-            } catch (e) {
-              continue;
-            }
-          }
-          if (!parsed) {
-            parsed = { brokenLinks: [] };
-            console.log('No valid data found, using empty array');
-          }
-          await pool.query(
-            'UPDATE jobs SET status = $1, result = $2, updated_at = CURRENT_TIMESTAMP WHERE id = $3',
-            ['completed', parsed, job.id]
-          );
-        } catch (err) {
-          console.error("❌ Failed to parse Python JSON output:", err);
-          console.error("Raw output:", stdoutData);
-          await pool.query(
-            'UPDATE jobs SET status = $1, updated_at = CURRENT_TIMESTAMP WHERE id = $2',
-            ['failed', job.id]
-          );
-        }
-      } else {
-        await pool.query(
-          'UPDATE jobs SET status = $1, updated_at = CURRENT_TIMESTAMP WHERE id = $2',
-          ['failed', job.id]
-        );
+      console.log(`Python process exited with code ${code}`);
+      if (code !== 0) {
+        return res.status(500).json({ error: `Python script failed`, details: stderrData });
       }
+
+      let parsed;
+      try {
+        // Split by newline and find the first valid JSON with data
+        const lines = stdoutData.trim().split('\n');
+        for (let i = 0; i < lines.length; i++) {
+          try {
+            const tempParsed = JSON.parse(lines[i]);
+            if (tempParsed.brokenLinks && tempParsed.brokenLinks.length > 0) {
+              parsed = tempParsed;
+              console.log('Parsed JSON with data:', parsed);
+              break;
+            }
+          } catch (e) {
+            continue; // Skip invalid lines
+          }
+        }
+        if (!parsed) {
+          parsed = { brokenLinks: [] }; // Default to empty if no data found
+          console.log('No valid data found, using empty array');
+        }
+      } catch (err) {
+        console.error("❌ Failed to parse Python JSON output:", err);
+        console.error("Raw output:", stdoutData);
+
+        const dbResult = await pool.query(
+          'SELECT video_id AS videoId, broken_link AS link FROM broken_links WHERE channel_id = $1 ORDER BY checked_at DESC LIMIT 10',
+          [channelId]
+        );
+        parsed = { brokenLinks: dbResult.rows };
+      }
+
+      const brokenLinks = parsed.brokenLinks || [];
+      res.json({ brokenLinks, success: true });
     });
 
     python.on('error', (err) => {
-      console.error('Python spawn error:', err.message);
-      pool.query(
-        'UPDATE jobs SET status = $1, updated_at = CURRENT_TIMESTAMP WHERE id = $2',
-        ['failed', job.id]
-      );
       res.status(500).json({ error: 'Failed to spawn Python', details: err.message });
     });
-
-    res.json({ jobId: job.id, status: 'in_progress', message: 'Check started' });
-  } catch (err) {
-    console.error('Check-links error:', err.stack); // Add stack trace for debugging
-    res.status(500).json({ error: err.message, stack: err.stack }); // Return detailed error
-  }
-});
-
-app.get('/api/check-links-status/:jobId', async (req, res) => {
-  const { jobId } = req.params;
-  try {
-    const queryResult = await pool.query('SELECT status, result FROM jobs WHERE id = $1', [jobId]); // Renamed to queryResult
-    if (queryResult.rows.length === 0) {
-      return res.status(404).json({ error: 'Job not found' });
-    }
-    const { status, result: jobResult } = queryResult.rows[0]; // Renamed inner 'result' to 'jobResult'
-    res.json({ jobId, status, brokenLinks: jobResult?.brokenLinks || [] });
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
