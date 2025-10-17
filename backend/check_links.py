@@ -143,4 +143,5 @@ if __name__ == "__main__":
         print("Usage: python check_links.py <channel_id> <max_videos>", file=sys.stderr)
         sys.exit(1)
     broken_links = main(sys.argv[1], int(sys.argv[2]))
-    print(json.dumps({'brokenLinks': broken_links}))  # Only JSON to stdout
+    print(json.dumps({'brokenLinks': broken_links}))  # Single JSON output
+    sys.exit(0)  # Explicit exit to prevent additional prints
