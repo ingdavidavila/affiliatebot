@@ -171,15 +171,6 @@ function App() {
           {/* LOGIN SECTION */}
           {!user ? (
             <div>
-              <button
-                className="btn btn-primary"
-                onClick={() => setShowLogin(true)}
-                disabled={loading}
-              >
-                {loading ? 'Logging in...' : 'Log in with YouTube'}
-              </button>
-
-              {showLogin && (
                 <div className="mt-3">
                   <GoogleLogin
                     onSuccess={handleLoginSuccess}
@@ -190,7 +181,6 @@ function App() {
                     theme="filled_blue"
                   />
                 </div>
-              )}
             </div>
           ) : (
             <div>
