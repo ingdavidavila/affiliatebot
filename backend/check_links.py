@@ -77,6 +77,9 @@ def check_link_status(url):
     try:
         response = requests.get(url, headers=headers, allow_redirects=True, timeout=10, stream=True)
         return response.status_code in [200, 301, 302], response.status_code
+    except requests.Timeout:
+        print(f"Timeout checking {url}, marking as broken", file=sys.stderr)
+        return False, 408  # 408 Request Timeout
     except requests.RequestException as e:
         print(f"Error checking {url}: {e}", file=sys.stderr)
         return False, None
