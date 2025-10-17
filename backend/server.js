@@ -45,15 +45,17 @@ const pool = new Pool({
 
 async function initializeDatabase() {
   try {
+    await pool.connect(); // Test connection
     const schema = fs.readFileSync('schema.sql', 'utf8');
     await pool.query(schema);
     console.log('Database schema applied successfully');
   } catch (err) {
-    console.error('Error applying schema:', err.message);
-    // Ignore "already exists" errors to avoid crashes on redeploy
+    console.error('Error applying schema or connecting:', err.message);
     if (!err.message.includes('already exists')) {
-      process.exit(1); // Exit if critical error
+      process.exit(1);
     }
+  } finally {
+    await pool.end(); // Close test connection
   }
 }
 
@@ -159,7 +161,6 @@ app.post('/api/check-links', async (req, res) => {
       if (code === 0) {
         let parsed;
         try {
-          // Split by newline and find the first valid JSON with data
           const lines = stdoutData.trim().split('\n');
           for (let i = 0; i < lines.length; i++) {
             try {
@@ -170,7 +171,7 @@ app.post('/api/check-links', async (req, res) => {
                 break;
               }
             } catch (e) {
-              continue; // Skip invalid lines
+              continue;
             }
           }
           if (!parsed) {
@@ -208,7 +209,8 @@ app.post('/api/check-links', async (req, res) => {
 
     res.json({ jobId: job.id, status: 'in_progress', message: 'Check started' });
   } catch (err) {
-    res.status(500).json({ error: err.message });
+    console.error('Check-links error:', err.stack); // Add stack trace for debugging
+    res.status(500).json({ error: err.message, stack: err.stack }); // Return detailed error
   }
 });
 
