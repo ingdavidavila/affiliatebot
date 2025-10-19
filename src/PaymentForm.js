@@ -15,17 +15,23 @@ const CheckoutForm = ({ customerId, plan, onSuccess, onClose }) => {
   const [clientSecret, setClientSecret] = useState(null);
 
   useEffect(() => {
-    const fetchClientSecret = async () => {
-      try {
-        const response = await createCheckoutSession(customerId, plan);
-        setClientSecret(response.data.clientSecret); // Adjust based on API response
-      } catch (err) {
-        setMessage('Failed to initialize payment.');
-        console.error('Error fetching client secret:', err);
+  const fetchClientSecret = async () => {
+    try {
+      const response = await createCheckoutSession(customerId, plan);
+      console.log('API Response:', response); // Debug the full response
+      if (response && response.clientSecret) {
+        setClientSecret(response.clientSecret);
+      } else {
+        throw new Error('Invalid or missing clientSecret in response');
       }
-    };
-    fetchClientSecret();
-  }, [customerId, plan]);
+    } catch (err) {
+      setMessage(`Failed to initialize payment: ${err.message}`);
+      console.error('Error fetching client secret:', err);
+      toast.error(`Payment initialization failed: ${err.message}`);
+    }
+  };
+  fetchClientSecret();
+}, [customerId, plan]);
 
   const handleSubmit = async (event) => {
     event.preventDefault();

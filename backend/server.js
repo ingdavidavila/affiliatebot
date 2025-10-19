@@ -175,6 +175,11 @@ app.post('/api/create-customer', async (req, res) => {
 app.post('/api/create-checkout-session', async (req, res) => {
   const { customerId, plan } = req.body;
   try {
+    console.log('Creating session with customerId:', customerId, 'plan:', plan);
+    console.log('Env vars:', {
+      monthlyPriceId: process.env.STRIPE_MONTHLY_PRICE_ID,
+      yearlyPriceId: process.env.STRIPE_YEARLY_PRICE_ID,
+    });
     const session = await stripe.checkout.sessions.create({
       customer: customerId,
       payment_method_types: ['card'],
@@ -191,10 +196,13 @@ app.post('/api/create-checkout-session', async (req, res) => {
       success_url: 'https://www.affiliatesbot.com/success?session_id={CHECKOUT_SESSION_ID}',
       cancel_url: 'https://www.affiliatesbot.com/cancel',
     });
-    console.log('Sending response:', { clientSecret: session.client_secret, sessionId: session.id });
-    res.json({ clientSecret: session.client_secret, sessionId: session.id }); // Return both for now
+    console.log('Stripe API response:', session);
+    if (!session.client_secret) {
+      throw new Error('Stripe session created but client_secret is missing');
+    }
+    res.json({ clientSecret: session.client_secret, sessionId: session.id });
   } catch (err) {
-    console.error('Stripe checkout error:', err.message);
+    console.error('Stripe checkout error:', err.message, err.stack);
     res.status(500).json({ error: err.message });
   }
 });
