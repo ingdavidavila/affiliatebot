@@ -6,31 +6,11 @@ import { toast } from 'react-toastify';
 
 const stripePromise = loadStripe(process.env.REACT_APP_STRIPE_PUBLISHABLE_KEY);
 
-const CheckoutForm = ({ customerId, plan, onSuccess, onClose }) => {
+const CheckoutForm = ({ customerId, plan, clientSecret, onSuccess, onClose }) => {
   const stripe = useStripe();
   const elements = useElements();
   const [message, setMessage] = useState(null);
   const [isLoading, setIsLoading] = useState(false);
-  const [clientSecret, setClientSecret] = useState(null);
-
-  useEffect(() => {
-    const fetchClientSecret = async () => {
-      try {
-        const response = await createCheckoutSession(customerId, plan);
-        console.log('API Response:', response);
-        if (response && response.clientSecret) {
-          setClientSecret(response.clientSecret);
-        } else {
-          throw new Error('Invalid or missing clientSecret in response');
-        }
-      } catch (err) {
-        setMessage(`Failed to initialize payment: ${err.message}`);
-        console.error('Error fetching client secret:', err);
-        toast.error(`Payment initialization failed: ${err.message}`);
-      }
-    };
-    fetchClientSecret();
-  }, [customerId, plan]);
 
   const handleSubmit = async (event) => {
     event.preventDefault();
@@ -94,10 +74,40 @@ const CheckoutForm = ({ customerId, plan, onSuccess, onClose }) => {
   );
 };
 
-const PaymentModal = ({ user, plan, onSuccess, onClose }) => (
-  <Elements stripe={stripePromise} options={{ clientSecret: null }}>
-    <CheckoutForm customerId={user.stripe_customer_id} plan={plan} onSuccess={onSuccess} onClose={onClose} />
-  </Elements>
-);
+const PaymentModal = ({ user, plan, onSuccess, onClose }) => {
+  const [clientSecret, setClientSecret] = useState(null);
+
+  useEffect(() => {
+    const fetchClientSecret = async () => {
+      try {
+        const response = await createCheckoutSession(user.stripe_customer_id, plan);
+        console.log('API Response:', response);
+        if (response && response.clientSecret) {
+          setClientSecret(response.clientSecret);
+        } else {
+          throw new Error('Invalid or missing clientSecret in response');
+        }
+      } catch (err) {
+        console.error('Error fetching client secret:', err);
+        toast.error(`Payment initialization failed: ${err.message}`);
+      }
+    };
+    fetchClientSecret();
+  }, [user.stripe_customer_id, plan]);
+
+  return clientSecret ? (
+    <Elements stripe={stripePromise} options={{ clientSecret }}>
+      <CheckoutForm
+        customerId={user.stripe_customer_id}
+        plan={plan}
+        clientSecret={clientSecret}
+        onSuccess={onSuccess}
+        onClose={onClose}
+      />
+    </Elements>
+  ) : (
+    <div>Loading payment form...</div>
+  );
+};
 
 export default PaymentModal;
