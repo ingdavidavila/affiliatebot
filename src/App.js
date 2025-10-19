@@ -251,7 +251,7 @@ function App() {
                 onMouseOver={(e) => (e.target.style.transform = 'scale(1.05)')}
                 onMouseOut={(e) => (e.target.style.transform = 'scale(1)')}
               >
-                $15/month
+                $14.99/month
               </button>
               <button
                 className="btn btn-success stylish-btn"
@@ -266,7 +266,7 @@ function App() {
                 onMouseOver={(e) => (e.target.style.transform = 'scale(1.05)')}
                 onMouseOut={(e) => (e.target.style.transform = 'scale(1)')}
               >
-                $100/year
+                $99.99/year
               </button>
               <p className="promise">Coming soon: Automated daily checks will be emailed to you!</p>
             </div>

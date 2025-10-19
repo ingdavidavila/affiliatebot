@@ -1,4 +1,3 @@
-// src/PaymentForm.js
 import React, { useState, useEffect } from 'react';
 import { loadStripe } from '@stripe/stripe-js';
 import { Elements, PaymentElement, useElements, useStripe } from '@stripe/react-stripe-js';
@@ -15,27 +14,30 @@ const CheckoutForm = ({ customerId, plan, onSuccess, onClose }) => {
   const [clientSecret, setClientSecret] = useState(null);
 
   useEffect(() => {
-  const fetchClientSecret = async () => {
-    try {
-      const response = await createCheckoutSession(customerId, plan);
-      console.log('API Response:', response); // Debug the full response
-      if (response && response.clientSecret) {
-        setClientSecret(response.clientSecret);
-      } else {
-        throw new Error('Invalid or missing clientSecret in response');
+    const fetchClientSecret = async () => {
+      try {
+        const response = await createCheckoutSession(customerId, plan);
+        console.log('API Response:', response);
+        if (response && response.clientSecret) {
+          setClientSecret(response.clientSecret);
+        } else {
+          throw new Error('Invalid or missing clientSecret in response');
+        }
+      } catch (err) {
+        setMessage(`Failed to initialize payment: ${err.message}`);
+        console.error('Error fetching client secret:', err);
+        toast.error(`Payment initialization failed: ${err.message}`);
       }
-    } catch (err) {
-      setMessage(`Failed to initialize payment: ${err.message}`);
-      console.error('Error fetching client secret:', err);
-      toast.error(`Payment initialization failed: ${err.message}`);
-    }
-  };
-  fetchClientSecret();
-}, [customerId, plan]);
+    };
+    fetchClientSecret();
+  }, [customerId, plan]);
 
   const handleSubmit = async (event) => {
     event.preventDefault();
-    if (!stripe || !elements || !clientSecret) return;
+    if (!stripe || !elements || !clientSecret) {
+      setMessage('Payment not initialized. Please try again.');
+      return;
+    }
 
     setIsLoading(true);
 
@@ -44,7 +46,6 @@ const CheckoutForm = ({ customerId, plan, onSuccess, onClose }) => {
       confirmParams: {
         return_url: 'https://www.affiliatesbot.com/success',
       },
-      redirect: 'if_required', // Allows redirect if needed by Checkout Session
     });
 
     if (error) {
@@ -59,7 +60,7 @@ const CheckoutForm = ({ customerId, plan, onSuccess, onClose }) => {
     setIsLoading(false);
   };
 
-  if (!clientSecret) return <div>Loading payment form...</div>;
+  if (!clientSecret) return <div>{message || 'Loading payment form...'}</div>;
 
   return (
     <form onSubmit={handleSubmit} className="payment-form">
@@ -94,7 +95,7 @@ const CheckoutForm = ({ customerId, plan, onSuccess, onClose }) => {
 };
 
 const PaymentModal = ({ user, plan, onSuccess, onClose }) => (
-  <Elements stripe={stripePromise} options={{ clientSecret: null }}> {/* Updated in CheckoutForm */}
+  <Elements stripe={stripePromise} options={{ clientSecret: null }}>
     <CheckoutForm customerId={user.stripe_customer_id} plan={plan} onSuccess={onSuccess} onClose={onClose} />
   </Elements>
 );

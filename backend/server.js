@@ -175,34 +175,28 @@ app.post('/api/create-customer', async (req, res) => {
 app.post('/api/create-checkout-session', async (req, res) => {
   const { customerId, plan } = req.body;
   try {
-    console.log('Creating session with customerId:', customerId, 'plan:', plan);
+    console.log('Creating Payment Intent with customerId:', customerId, 'plan:', plan);
     console.log('Env vars:', {
       monthlyPriceId: process.env.STRIPE_MONTHLY_PRICE_ID,
       yearlyPriceId: process.env.STRIPE_YEARLY_PRICE_ID,
     });
-    const session = await stripe.checkout.sessions.create({
+    const amount = plan === 'monthly' ? 1499 : 9999; // $14.99 or $99.99 in cents
+    const paymentIntent = await stripe.paymentIntents.create({
       customer: customerId,
-      payment_method_types: ['card'],
-      mode: 'subscription',
-      line_items: [
-        {
-          price:
-            plan === 'monthly'
-              ? process.env.STRIPE_MONTHLY_PRICE_ID
-              : process.env.STRIPE_YEARLY_PRICE_ID,
-          quantity: 1,
-        },
-      ],
-      success_url: 'https://www.affiliatesbot.com/success?session_id={CHECKOUT_SESSION_ID}',
-      cancel_url: 'https://www.affiliatesbot.com/cancel',
+      amount: amount,
+      currency: 'usd',
+      automatic_payment_methods: {
+        enabled: true,
+      },
+      metadata: { plan },
     });
-    console.log('Stripe API response:', session);
-    if (!session.client_secret) {
-      throw new Error('Stripe session created but client_secret is missing');
+    console.log('Stripe API response:', paymentIntent);
+    if (!paymentIntent.client_secret) {
+      throw new Error('Payment Intent created but client_secret is missing');
     }
-    res.json({ clientSecret: session.client_secret, sessionId: session.id });
+    res.json({ clientSecret: paymentIntent.client_secret, sessionId: paymentIntent.id });
   } catch (err) {
-    console.error('Stripe checkout error:', err.message, err.stack);
+    console.error('Stripe payment error:', err.message, err.stack);
     res.status(500).json({ error: err.message });
   }
 });
