@@ -191,6 +191,7 @@ app.post('/api/create-checkout-session', async (req, res) => {
       success_url: 'https://www.affiliatesbot.com/success?session_id={CHECKOUT_SESSION_ID}',
       cancel_url: 'https://www.affiliatesbot.com/cancel',
     });
+    console.log('Sending response:', { clientSecret: session.client_secret, sessionId: session.id });
     res.json({ clientSecret: session.client_secret, sessionId: session.id }); // Return both for now
   } catch (err) {
     console.error('Stripe checkout error:', err.message);
