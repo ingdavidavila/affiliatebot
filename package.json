@@ -2,7 +2,7 @@
   "name": "affiliatebot",
   "version": "0.1.0",
   "private": true,
-   "heroku-run-build-script": false,
+  "heroku-run-build-script": false,
   "dependencies": {
     "@babel/preset-env": "^7.28.3",
     "@react-oauth/google": "^0.12.2",
