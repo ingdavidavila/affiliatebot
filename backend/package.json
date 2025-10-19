@@ -18,7 +18,7 @@
     "uuid": "^13.0.0"
   },
   "engines": {
-    "node": "18.x"
+    "node": ">=18.0.0"
   },
   "author": "Acade",
   "license": "ISC"
