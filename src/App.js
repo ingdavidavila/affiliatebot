@@ -1,6 +1,5 @@
 import React, { useState, useEffect } from 'react';
 import { GoogleLogin } from '@react-oauth/google';
-import { loadStripe } from '@stripe/stripe-js';
 import { ToastContainer, toast } from 'react-toastify';
 import 'react-toastify/dist/ReactToastify.css';
 import './App.css';
@@ -12,6 +11,7 @@ import {
   createCustomer,
   createCheckoutSession,
 } from './api';
+import PaymentModal from './PaymentForm'; // New component
 
 const stripePromise = loadStripe(process.env.REACT_APP_STRIPE_PUBLISHABLE_KEY);
 
@@ -24,10 +24,11 @@ function App() {
   const [paid, setPaid] = useState(false);
   const [showChannelPrompt, setShowChannelPrompt] = useState(false);
   const [channelInput, setChannelInput] = useState('');
-  const [currentPage, setCurrentPage] = useState(1); // New state for page
-  const itemsPerPage = 10; // Set to 10 items per page
+  const [currentPage, setCurrentPage] = useState(1);
+  const [showPaymentModal, setShowPaymentModal] = useState(false); // New state for modal
+  const [selectedPlan, setSelectedPlan] = useState(null); // Track selected plan
+  const itemsPerPage = 10;
 
-  // ✅ Verify payment on redirect (after user is set)
   useEffect(() => {
     const urlParams = new URLSearchParams(window.location.search);
     const sessionId = urlParams.get('session_id');
@@ -81,64 +82,46 @@ function App() {
   };
 
   const handleChannelSubmit = async () => {
-  if (!channelInput.trim()) {
-    setError('Channel ID is required to check links.');
-    toast.error('Channel ID is required.');
-    return;
-  }
-  setLoading(true);
-  const maxRetries = 3; // Number of retry attempts
-  const retryDelay = 5000; // 5-second delay between retries
-  let attempt = 0;
+    if (!channelInput.trim()) {
+      setError('Channel ID is required to check links.');
+      toast.error('Channel ID is required.');
+      return;
+    }
+    setLoading(true);
+    const maxRetries = 3;
+    const retryDelay = 5000;
+    let attempt = 0;
 
-  try {
-    setUser((prev) => ({ ...prev, lastChannelId: channelInput }));
-    const maxVideos = paid ? -1 : 50; // Original logic
-    let results;
-    while (attempt < maxRetries) {
-      try {
-        results = await apiCheckLinks(channelInput, maxVideos, setResults, (msg) => toast.error(msg));
-        setResults(results);
-        setShowChannelPrompt(false);
-        setCurrentPage(1); // Reset to first page on new check
-        toast.success('Check complete!');
-        break; // Exit loop on success
-      } catch (err) {
-        attempt++;
-        if (err.code === 'ECONNABORTED' || err.response?.status === 503) {
-          // Timeout or H12 detected, wait and retry
-          if (attempt === maxRetries) {
-            throw new Error('Check timed out after retries.');
+    try {
+      setUser((prev) => ({ ...prev, lastChannelId: channelInput }));
+      const maxVideos = paid ? -1 : 50;
+      let results;
+      while (attempt < maxRetries) {
+        try {
+          results = await apiCheckLinks(channelInput, maxVideos, setResults, (msg) => toast.error(msg));
+          setResults(results);
+          setShowChannelPrompt(false);
+          setCurrentPage(1);
+          toast.success('Check complete!');
+          break;
+        } catch (err) {
+          attempt++;
+          if (err.code === 'ECONNABORTED' || err.response?.status === 503) {
+            if (attempt === maxRetries) {
+              throw new Error('Check timed out after retries.');
+            }
+            console.log(`Attempt ${attempt} failed with timeout, retrying in ${retryDelay}ms...`);
+            await new Promise(resolve => setTimeout(resolve, retryDelay));
+          } else {
+            throw err;
           }
-          console.log(`Attempt ${attempt} failed with timeout, retrying in ${retryDelay}ms...`);
-          await new Promise(resolve => setTimeout(resolve, retryDelay));
-        } else {
-          // Other errors (e.g., 400, 500) should fail immediately
-          throw err;
         }
       }
-    }
-    if (!results) {
-      throw new Error('No results received after retries.');
-    }
-  } catch (err) {
-    const message = err.message || 'Failed to check links.';
-    setError(message);
-    toast.error(message);
-  } finally {
-    setLoading(false);
-  }
-};
-
-  const handlePayment = async (plan) => {
-    setLoading(true);
-    try {
-      const { data: { customerId } } = await createCustomer(user.email);
-      const { data: { sessionId } } = await createCheckoutSession(customerId, plan);
-      const stripe = await stripePromise;
-      await stripe.redirectToCheckout({ sessionId });
+      if (!results) {
+        throw new Error('No results received after retries.');
+      }
     } catch (err) {
-      const message = 'Payment initiation failed: ' + err.message;
+      const message = err.message || 'Failed to check links.';
       setError(message);
       toast.error(message);
     } finally {
@@ -146,7 +129,23 @@ function App() {
     }
   };
 
-  // Pagination logic
+  const handlePayment = (plan) => {
+    setSelectedPlan(plan);
+    setShowPaymentModal(true);
+  };
+
+  const handlePaymentSuccess = () => {
+    setShowPaymentModal(false);
+    setPaid(true); // Update paid status after success
+    setSelectedPlan(null);
+    toast.success('Payment successful! Checking unlimited links is now enabled.');
+  };
+
+  const handlePaymentClose = () => {
+    setShowPaymentModal(false);
+    setSelectedPlan(null);
+  };
+
   const indexOfLastItem = currentPage * itemsPerPage;
   const indexOfFirstItem = indexOfLastItem - itemsPerPage;
   const currentResults = results.slice(indexOfFirstItem, indexOfLastItem);
@@ -168,19 +167,18 @@ function App() {
             Click the button below to log in with your YouTube account and check for broken affiliate links in your videos.
           </p>
 
-          {/* LOGIN SECTION */}
           {!user ? (
             <div>
-                <div className="mt-3">
-                  <GoogleLogin
-                    onSuccess={handleLoginSuccess}
-                    onError={handleLoginFailure}
-                    scope="https://www.googleapis.com/auth/youtube.readonly"
-                    text="signin_with"
-                    shape="rectangular"
-                    theme="filled_blue"
-                  />
-                </div>
+              <div className="mt-3">
+                <GoogleLogin
+                  onSuccess={handleLoginSuccess}
+                  onError={handleLoginFailure}
+                  scope="https://www.googleapis.com/auth/youtube.readonly"
+                  text="signin_with"
+                  shape="rectangular"
+                  theme="filled_blue"
+                />
+              </div>
             </div>
           ) : (
             <div>
@@ -200,14 +198,12 @@ function App() {
             </div>
           )}
 
-          {/* STATUS + ERRORS */}
           {loading && <p className="loading">Checking links...</p>}
           {error && <p className="error">{error}</p>}
           {results.length === 0 && !error && user && !loading && (
             <p className="no-results">No broken links found.</p>
           )}
 
-          {/* CHANNEL PROMPT */}
           {showChannelPrompt && (
             <div className="channel-prompt">
               <h2 className="heading">Enter Your Channel ID</h2>
@@ -238,7 +234,6 @@ function App() {
             </div>
           )}
 
-          {/* PAYWALL */}
           {results.length > 0 && !paid && (
             <div className="paywall">
               <p>{results.length} broken links found. Please subscribe to view details:</p>
@@ -276,7 +271,6 @@ function App() {
             </div>
           )}
 
-          {/* RESULTS TABLE WITH PAGINATION */}
           {results.length > 0 && paid && (
             <div className="results-table">
               <table className="table">
@@ -314,7 +308,6 @@ function App() {
                   ))}
                 </tbody>
               </table>
-              {/* Pagination Controls */}
               <div className="pagination" style={{ marginTop: '1rem', textAlign: 'center' }}>
                 <button
                   className="btn btn-secondary"
@@ -338,9 +331,21 @@ function App() {
               </div>
             </div>
           )}
+
+          {showPaymentModal && user && (
+            <div className="modal" style={{ position: 'fixed', top: 0, left: 0, right: 0, bottom: 0, backgroundColor: 'rgba(0,0,0,0.5)', display: 'flex', justifyContent: 'center', alignItems: 'center', zIndex: 1000 }}>
+              <div style={{ backgroundColor: 'white', padding: '20px', borderRadius: '5px', maxWidth: '500px', width: '100%' }}>
+                <PaymentModal
+                  user={user}
+                  plan={selectedPlan}
+                  onSuccess={handlePaymentSuccess}
+                  onClose={handlePaymentClose}
+                />
+              </div>
+            </div>
+          )}
         </div>
 
-        {/* FOOTER */}
         <footer className="footer bg-dark text-white text-center py-3">
           <p className="mb-0">
             This website was made by{' '}

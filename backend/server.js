@@ -188,10 +188,10 @@ app.post('/api/create-checkout-session', async (req, res) => {
           quantity: 1,
         },
       ],
-      success_url: 'https://www.affiliatesbot.com/success?session_id={CHECKOUT_SESSION_ID}', // Updated to production domain
-      cancel_url: 'https://www.affiliatesbot.com/cancel', // Updated to production domain
+      success_url: 'https://www.affiliatesbot.com/success?session_id={CHECKOUT_SESSION_ID}',
+      cancel_url: 'https://www.affiliatesbot.com/cancel',
     });
-    res.json({ sessionId: session.id });
+    res.json({ clientSecret: session.client_secret, sessionId: session.id }); // Return both for now
   } catch (err) {
     console.error('Stripe checkout error:', err.message);
     res.status(500).json({ error: err.message });

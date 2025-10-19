@@ -81,5 +81,7 @@ export const checkLinks = async (channelId, maxVideos, setResults, toastError) =
 };
 
 export const createCustomer = async (email) => api.post('/create-customer', { email });
-export const createCheckoutSession = async (customerId, plan) =>
-  api.post('/create-checkout-session', { customerId, plan });
+export const createCheckoutSession = async (customerId, plan) => {
+  const response = await api.post('/api/create-checkout-session', { customerId, plan });
+  return response.data; // Returns { clientSecret, sessionId }
+};
