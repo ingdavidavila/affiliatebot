@@ -9,9 +9,8 @@ import {
   createCheckoutSession,
   verifyPayment,
   checkLinks,
-  getJobStatus,
+  // Remove getJobStatus since checkLinks handles polling
 } from "./api";
-
 import AccountDropdown from "./AccountDropdown";
 
 function App() {
@@ -28,49 +27,47 @@ function App() {
   const itemsPerPage = 10;
 
   // ===== On mount, check if returning from Stripe payment =====
-  // ===== On mount, check if returning from Stripe payment =====
-useEffect(() => {
-  const urlParams = new URLSearchParams(window.location.search);
-  const sessionId = urlParams.get("session_id");
-  const token = localStorage.getItem("authToken");
+  useEffect(() => {
+    const urlParams = new URLSearchParams(window.location.search);
+    const sessionId = urlParams.get("session_id");
+    const token = localStorage.getItem("authToken");
 
-  (async () => {
-    // Rehydrate user if token exists
-    if (token) {
-      try {
-        const res = await getCurrentUser(token);
-        setUser({ email: res.data.email });
-        setPaid(res.data.paid);
-        setShowChannelPrompt(true);
-      } catch (err) {
-        console.error("Failed to fetch user:", err);
-      }
-    }
-
-    // Handle Stripe return flow
-    if (sessionId && token) {
-      try {
-        const verifyRes = await verifyPayment(sessionId, token);
-        if (verifyRes.data.paid) {
-          toast.success("Payment verified! Subscription active.");
-          setPaid(true);
+    (async () => {
+      // Rehydrate user if token exists
+      if (token) {
+        try {
+          const res = await getCurrentUser(token);
+          setUser({ email: res.data.email, token });
+          setPaid(res.data.paid || false); // Ensure paid is false if undefined
+          setShowChannelPrompt(true);
+        } catch (err) {
+          console.error("Failed to fetch user:", err);
+          localStorage.removeItem("authToken"); // Clear invalid token
         }
-      } catch (err) {
-        console.error("Payment verification failed:", err);
-        toast.error("Failed to verify payment.");
-      } finally {
-        // Clean session_id param from URL
-        urlParams.delete("session_id");
-        const qs = urlParams.toString();
-        const cleanUrl = qs
-          ? `${window.location.pathname}?${qs}`
-          : window.location.pathname;
-        window.history.replaceState({}, "", cleanUrl);
       }
-    }
-  })();
-}, []);
 
+      // Handle Stripe return flow
+      if (sessionId && token) {
+        try {
+          const verifyRes = await verifyPayment(sessionId, token);
+          if (verifyRes.data.paid) {
+            setPaid(true);
+            toast.success("Payment verified! Subscription active.");
+          }
+        } catch (err) {
+          console.error("Payment verification failed:", err);
+          toast.error("Failed to verify payment.");
+        } finally {
+          urlParams.delete("session_id");
+          const qs = urlParams.toString();
+          const cleanUrl = qs
+            ? `${window.location.pathname}?${qs}`
+            : window.location.pathname;
+          window.history.replaceState({}, "", cleanUrl);
+        }
+      }
+    })();
+  }, []);
 
   // ===== Handle Google Login =====
   const handleLoginSuccess = async (cred) => {
@@ -78,10 +75,10 @@ useEffect(() => {
     try {
       const response = await authGoogle(cred.credential);
       const userData = response.data.user || response.data;
-      setUser(userData);
+      setUser({ ...userData, token: cred.credential });
       localStorage.setItem("authToken", cred.credential);
       const status = await getCurrentUser(cred.credential);
-      setPaid(status.data.paid);
+      setPaid(status.data.paid || false);
       setShowChannelPrompt(true);
       toast.success("Logged in successfully!");
     } catch (err) {
@@ -102,61 +99,48 @@ useEffect(() => {
   };
 
   // ===== Handle Channel Check =====
-const handleChannelSubmit = async () => {
-  if (!channelInput.trim()) {
-    toast.error("Please enter a Channel ID.");
-    return;
-  }
+  const handleChannelSubmit = async () => {
+    if (!channelInput.trim()) {
+      toast.error("Please enter a Channel ID.");
+      return;
+    }
 
-  setLoading(true);
-  try {
-    const token = localStorage.getItem("authToken");
-    toast.info("Analyzing your videos... this may take up to 30 seconds.");
+    setLoading(true);
+    try {
+      const token = localStorage.getItem("authToken");
+      if (!token) throw new Error("Please log in to check links.");
 
-    // Start the link check job
-    const res = await checkLinks(channelInput, paid ? -1 : 50, token);
-    const jobId = res.data.jobId;
-    if (!jobId) throw new Error("Failed to start job.");
+      const maxVideos = paid ? -1 : 50; // -1 for all videos if paid
+      toast.info(`Analyzing your videos... this may take a while for large channels.`);
 
-    // Poll for job status (wait for Python script to finish)
-    let jobResult = null;
-    for (let i = 0; i < 30; i++) { // retry ~30s total
-      const statusRes = await getJobStatus(jobId, token);
-      const job = statusRes.data;
-      if (job.status === "completed") {
-        jobResult = job.result;
-        break;
-      } else if (job.status === "error") {
-        throw new Error(job.result?.error || "Job failed.");
+      await checkLinks(channelInput, maxVideos, token, setResults, (msg) =>
+        toast.error(msg)
+      );
+
+      const total = totalVideos || (results.length > 0 ? results.length : 0);
+      setTotalVideos(total);
+
+      if (results.length === 0 && total > 50 && !paid) {
+        toast.info(
+          "No broken links found in the first 50. Subscribe to check your full library!"
+        );
+      } else {
+        toast.success(`Checked ${paid ? "all" : "first 50"} videos!`);
       }
-      await new Promise((r) => setTimeout(r, 1000)); // wait 1s between checks
+    } catch (err) {
+      console.error("Check-links error:", err);
+      setError(err.message || "Failed to check links.");
+      toast.error(err.message || "Failed to check links.");
+    } finally {
+      setLoading(false);
     }
-
-    if (!jobResult) throw new Error("Timed out waiting for job completion.");
-
-    const brokenLinks = jobResult.brokenLinks || [];
-    const total = jobResult.totalVideos || 0;
-    setResults(brokenLinks);
-    setTotalVideos(total);
-
-    if (brokenLinks.length === 0 && total > 50 && !paid) {
-      toast.info("No broken links found in the first 50. Subscribe to check your full library!");
-    } else {
-      toast.success(`Checked ${paid ? "all" : "first 50"} videos!`);
-    }
-
-  } catch (err) {
-    console.error("Check-links error:", err);
-    toast.error(err.message || "Failed to check links.");
-  } finally {
-    setLoading(false);
-  }
-};
+  };
 
   // ===== Stripe Payment Redirect =====
   const handleSubscribe = async (plan) => {
     try {
       const token = localStorage.getItem("authToken");
+      if (!token) throw new Error("Please log in to subscribe.");
       const res = await createCheckoutSession(plan, token);
       window.location.href = res.data.url; // redirect to Stripe Checkout
     } catch (err) {
@@ -173,9 +157,7 @@ const handleChannelSubmit = async () => {
   const paginate = (page) => setCurrentPage(page);
 
   // ===== Paywall condition =====
-  const shouldShowPaywall =
-   !paid && ((results.length > 0) || (results.length === 0 && totalVideos > 50));
-
+  const shouldShowPaywall = !paid && ((results.length > 0) || (results.length === 0 && totalVideos > 50));
 
   return (
     <div className="app-wrapper">
@@ -324,7 +306,6 @@ const handleChannelSubmit = async () => {
           >
             WorkingRobots Inc.
           </a>
-          
         </footer>
       </div>
     </div>

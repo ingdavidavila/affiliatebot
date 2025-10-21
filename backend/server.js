@@ -1,6 +1,4 @@
-// server.js
 require('dotenv').config();
-
 const fs = require('fs');
 const path = require('path');
 const express = require('express');
@@ -11,14 +9,13 @@ const { google } = require('googleapis');
 const { OAuth2Client } = require('google-auth-library');
 const Stripe = require('stripe');
 const { v4: uuidv4 } = require('uuid');
+const Queue = require('bull');
+const redis = require('ioredis');
 
 const app = express();
 
 // ======== CORS ========
-const allowedOrigins = [
-  'https://www.affiliatesbot.com',
-  'http://localhost:3000',
-];
+const allowedOrigins = ['https://www.affiliatesbot.com', 'http://localhost:3000'];
 app.use(cors({
   origin(origin, cb) {
     if (!origin || allowedOrigins.includes(origin)) cb(null, true);
@@ -34,6 +31,12 @@ const pool = new Pool({
   connectionString: process.env.DATABASE_URL,
   ssl: { rejectUnauthorized: false },
 });
+const redisUrl = process.env.REDIS_URL;
+if (!redisUrl) {
+  console.error('REDIS_URL not set, queue will not function. Check Heroku addon status.');
+  process.exit(1); // Exit if Redis is unavailable
+}
+const linkCheckQueue = new Queue('link-check', redisUrl);
 
 const FRONTEND_URL = process.env.FRONTEND_URL || 'http://localhost:3000';
 const MONTHLY_PRICE_ID = process.env.STRIPE_MONTHLY_PRICE_ID;
@@ -112,7 +115,6 @@ app.post('/api/auth/google', async (req, res) => {
   }
 });
 
-
 // ======== YouTube Helper ========
 async function getTotalVideoCount(channelId) {
   const youtube = google.youtube({ version: 'v3', auth: process.env.YOUTUBE_API_KEY });
@@ -125,61 +127,60 @@ async function getTotalVideoCount(channelId) {
   }
 }
 
-// ======== Link Checker ========
-const jobs = {};
+// ======== Link Checker with Queue ========
+linkCheckQueue.process(async (job) => {
+  const { channelId, maxVideos } = job.data;
+  console.log(`Processing job ${job.id} for channel ${channelId}`);
+  try {
+    const python = spawn('python3', ['check_links.py', channelId, maxVideos || 50]);
+    let output = '';
+    python.stdout.on('data', (d) => (output += d.toString()));
+    python.stderr.on('data', (d) => console.error(`PYTHON ERROR ${job.id}:`, d.toString()));
+
+    const totalVideosPromise = getTotalVideoCount(channelId);
+    await new Promise((resolve, reject) => {
+      python.on('close', async (code) => {
+        try {
+          const parsed = JSON.parse(output);
+          const totalVideos = await totalVideosPromise;
+          await job.update({
+            status: 'completed',
+            result: { brokenLinks: parsed.brokenLinks || [], totalVideos },
+          });
+          resolve();
+        } catch (err) {
+          console.error(`❌ Job ${job.id} parse error:`, err.message, output);
+          await job.update({ status: 'error', error: 'Invalid output' });
+          reject(err);
+        }
+      });
+    });
+  } catch (err) {
+    console.error(`Job ${job.id} failed:`, err.message);
+    await job.update({ status: 'error', error: err.message });
+  }
+});
+
 app.post('/api/check-links', async (req, res) => {
   const { channelId, maxVideos } = req.body;
-  const jobId = uuidv4();
-  jobs[jobId] = { status: 'running', result: null };
+  if (!channelId) return res.status(400).json({ error: 'Channel ID is required' });
 
-  const python = spawn('python3', ['check_links.py', channelId, maxVideos]);
-  let output = '';
-  python.stdout.on('data', d => output += d.toString());
-  python.stderr.on('data', (d) => console.error('PYTHON ERROR:', d.toString()));
-  const totalVideosPromise = getTotalVideoCount(channelId);
-
-  python.on('close', async (code) => {
-  try {
-    const parsed = JSON.parse(output);
-    const totalVideos = await totalVideosPromise;
-    jobs[jobId] = {
-      status: 'completed',
-      result: { brokenLinks: parsed.brokenLinks || [], totalVideos },
-    };
-    console.log(`✅ Job ${jobId} completed with ${parsed.brokenLinks?.length || 0} broken links`);
-  } catch (err) {
-    console.error('❌ Python output parse error:', err.message, output);
-    jobs[jobId] = { status: 'error', result: { error: 'Invalid output' } };
-  }
+  const job = await linkCheckQueue.add({ channelId, maxVideos });
+  res.json({ jobId: job.id });
 });
 
-  res.json({ jobId });
-});
+app.get('/api/check-links/status/:jobId', async (req, res) => {
+  const job = await linkCheckQueue.getJob(req.params.jobId);
+  if (!job) return res.status(404).json({ status: 'not_found' });
 
-app.get('/api/check-links/status/:jobId', (req, res) => {
-  const { jobId } = req.params;
-  const job = jobs[jobId];
-
-  if (!job) {
-    return res.status(404).json({ status: 'not_found' });
+  const state = await job.getState();
+  const data = await job.getJobData();
+  if (state === 'completed') {
+    return res.json({ status: 'completed', result: data.result });
+  } else if (state === 'failed') {
+    return res.status(500).json({ status: 'error', result: data.error });
   }
-
-  if (job.status === 'completed') {
-    return res.json({
-      status: 'completed',
-      result: job.result,
-    });
-  }
-
-  if (job.status === 'error') {
-    return res.status(500).json({
-      status: 'error',
-      result: job.result,
-    });
-  }
-
-  // Still running
-  res.json({ status: 'running' });
+  res.json({ status: state });
 });
 
 
