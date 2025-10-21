@@ -144,9 +144,9 @@ app.post('/api/check-links', async (req, res) => {
     const totalVideos = await totalVideosPromise;
     jobs[jobId] = {
       status: 'completed',
-      result: { brokenLinks: parsed, totalVideos },
+      result: { brokenLinks: parsed.brokenLinks || [], totalVideos },
     };
-    console.log(`✅ Job ${jobId} completed with ${parsed.length} broken links`);
+    console.log(`✅ Job ${jobId} completed with ${parsed.brokenLinks?.length || 0} broken links`);
   } catch (err) {
     console.error('❌ Python output parse error:', err.message, output);
     jobs[jobId] = { status: 'error', result: { error: 'Invalid output' } };
