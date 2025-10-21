@@ -1,87 +1,76 @@
-import axios from 'axios';
+import axios from "axios";
 
-// ✅ Automatically detect correct API base URL
-const API_BASE_URL =
-  process.env.NODE_ENV === 'production'
-    ? 'https://www.affiliatesbot.com/api'
-    : 'http://localhost:3001/api';
+const API_BASE =
+  process.env.NODE_ENV === "production"
+    ? "https://www.affiliatesbot.com/api"
+    : "http://localhost:3001/api";
 
-// ✅ Use one consistent Axios instance
-const api = axios.create({
-  baseURL: API_BASE_URL,
-  headers: { 'Content-Type': 'application/json' },
-  timeout: 35000,
-});
+/**
+ * Create an axios instance with optional Authorization header
+ */
+function createApiClient(token) {
+  const headers = { "Content-Type": "application/json" };
+  if (token) headers.Authorization = `Bearer ${token}`;
+  return axios.create({ baseURL: API_BASE, headers });
+}
 
-// --- API functions ---
+/**
+ * Auth Google ID token -> backend verification
+ */
+export async function authGoogle(idToken) {
+  const res = await axios.post(`${API_BASE}/auth/google`, { token: idToken });
+  return res;
+}
 
-export const verifyPayment = async (
-  sessionId,
-  setLoading,
-  setPaid,
-  setShowChannelPrompt,
-  setChannelInput,
-  user,
-  toastError
-) => {
-  setLoading(true);
-  try {
-    const { data } = await api.post('/verify-payment', { sessionId });
-    setPaid(data.paid);
-    if (data.paid && user) {
-      setShowChannelPrompt(true);
-      setChannelInput(user.lastChannelId || '');
-    }
-  } catch (err) {
-    toastError('Something went wrong while verifying your payment.');
-  } finally {
-    setLoading(false);
-  }
-};
+/**
+ * Get current user info and paid status (requires token)
+ */
+export async function getCurrentUser(token) {
+  const api = createApiClient(token);
+  const res = await api.get("/me");
+  return res;
+}
 
-export const authGoogle = async (token) => {
-  return await api.post('/auth/google', { token });
-};
+/**
+ * Create Stripe Checkout Session for a given plan ('monthly' | 'yearly')
+ */
+export async function createCheckoutSession(plan, token) {
+  const api = createApiClient(token);
+  const res = await api.post("/create-checkout-session", { plan });
+  return res;
+}
 
-export const getUserStatus = async (email) => {
-  return await api.get(`/user-status?email=${email}`);
-};
+/**
+ * Verify Stripe payment session (used after redirect)
+ */
+export async function verifyPayment(sessionId, token) {
+  const api = createApiClient(token);
+  const res = await api.post("/verify-payment", { sessionId });
+  return res;
+}
 
-// ✅ Fixed version — uses API_BASE_URL consistently and resolves properly
-export const checkLinks = async (channelId, maxVideos, setResults, toastError) => {
-  try {
-    // Step 1: Start background job
-    const { data } = await api.post('/check-links', { channelId, maxVideos });
-    const jobId = data.jobId;
+/**
+ * Cancel an active subscription (no refund)
+ */
+export async function cancelSubscription(token) {
+  const api = createApiClient(token);
+  const res = await api.post("/cancel-subscription");
+  return res;
+}
 
-    // Step 2: Poll every 3 seconds until done
-    return new Promise((resolve, reject) => {
-      const poll = setInterval(async () => {
-        try {
-          const res = await api.get(`/check-links/status/${jobId}`);
-          if (res.data.status === 'completed') {
-            clearInterval(poll);
-            setResults(res.data.result.brokenLinks);
-            resolve(res.data.result.brokenLinks);
-          } else if (res.data.status === 'error') {
-            clearInterval(poll);
-            toastError('Something went wrong while checking your links.');
-            reject(new Error('Job failed.'));
-          }
-        } catch (err) {
-          clearInterval(poll);
-          reject(err);
-        }
-      }, 3000);
-    });
-  } catch (err) {
-    toastError('Unable to start the link check.');
-    throw err;
-  }
-};
+/**
+ * Check YouTube channel for broken links (backend runs Python)
+ */
+export async function checkLinks(channelId, maxVideos, token) {
+  const api = createApiClient(token);
+  const res = await api.post("/check-links", { channelId, maxVideos });
+  return res;
+}
 
-export const createCustomer = async (email) => api.post('/create-customer', { email });
-export const createCheckoutSession = async (customerId, plan) => {
-  const response = await api.post('/create-checkout-session', { customerId, plan }); // Removed extra /api
-  return response.data; // Returns { clientSecret, sessionId }
-};
+/**
+ * Poll job status for check-links
+ */
+export async function getJobStatus(jobId) {
+  const res = await axios.get(`${API_BASE}/check-links/status/${jobId}`);
+  return res;
+}

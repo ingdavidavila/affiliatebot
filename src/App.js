@@ -1,364 +1,301 @@
-import React, { useState, useEffect } from 'react';
-import { GoogleLogin } from '@react-oauth/google';
-import { loadStripe } from '@stripe/stripe-js';
-import { ToastContainer, toast } from 'react-toastify';
-import 'react-toastify/dist/ReactToastify.css';
-import './App.css';
+import React, { useState, useEffect } from "react";
+import { GoogleLogin } from "@react-oauth/google";
+import { ToastContainer, toast } from "react-toastify";
+import "react-toastify/dist/ReactToastify.css";
+import "./App.css";
 import {
-  verifyPayment,
   authGoogle,
-  getUserStatus,
-  checkLinks as apiCheckLinks,
-  createCustomer,
+  getCurrentUser,
   createCheckoutSession,
-} from './api';
-import PaymentModal from './PaymentForm'; // New component
+  verifyPayment,
+  checkLinks,
+  getJobStatus,
+} from "./api";
 
-const stripePromise = loadStripe(process.env.REACT_APP_STRIPE_PUBLISHABLE_KEY);
+import AccountDropdown from "./AccountDropdown";
 
 function App() {
   const [user, setUser] = useState(null);
-  const [error, setError] = useState('');
-  const [results, setResults] = useState([]);
-  const [showLogin, setShowLogin] = useState(false);
-  const [loading, setLoading] = useState(false);
   const [paid, setPaid] = useState(false);
+  const [results, setResults] = useState([]);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState("");
+  const [channelInput, setChannelInput] = useState("");
   const [showChannelPrompt, setShowChannelPrompt] = useState(false);
-  const [channelInput, setChannelInput] = useState('');
   const [currentPage, setCurrentPage] = useState(1);
-  const [showPaymentModal, setShowPaymentModal] = useState(false); // New state for modal
-  const [selectedPlan, setSelectedPlan] = useState(null); // Track selected plan
+  const [totalVideos, setTotalVideos] = useState(0);
+
   const itemsPerPage = 10;
 
-  useEffect(() => {
-    const urlParams = new URLSearchParams(window.location.search);
-    const sessionId = urlParams.get('session_id');
-    if (sessionId) {
-      verifyPayment(
-        sessionId,
-        setLoading,
-        setPaid,
-        setShowChannelPrompt,
-        setChannelInput,
-        user,
-        (msg) => toast.error(msg)
-      );
-    }
-  }, [user]);
+  // ===== On mount, check if returning from Stripe payment =====
+  // ===== On mount, check if returning from Stripe payment =====
+useEffect(() => {
+  const urlParams = new URLSearchParams(window.location.search);
+  const sessionId = urlParams.get("session_id");
+  const token = localStorage.getItem("authToken");
 
-  const handleLoginSuccess = async (credentialResponse) => {
+  (async () => {
+    // Rehydrate user if token exists
+    if (token) {
+      try {
+        const res = await getCurrentUser(token);
+        setUser({ email: res.data.email });
+        setPaid(res.data.paid);
+        setShowChannelPrompt(true);
+      } catch (err) {
+        console.error("Failed to fetch user:", err);
+      }
+    }
+
+    // Handle Stripe return flow
+    if (sessionId && token) {
+      try {
+        const verifyRes = await verifyPayment(sessionId, token);
+        if (verifyRes.data.paid) {
+          toast.success("Payment verified! Subscription active.");
+          setPaid(true);
+        }
+      } catch (err) {
+        console.error("Payment verification failed:", err);
+        toast.error("Failed to verify payment.");
+      } finally {
+        // Clean session_id param from URL
+        urlParams.delete("session_id");
+        const qs = urlParams.toString();
+        const cleanUrl = qs
+          ? `${window.location.pathname}?${qs}`
+          : window.location.pathname;
+        window.history.replaceState({}, "", cleanUrl);
+      }
+    }
+  })();
+}, []);
+
+
+  // ===== Handle Google Login =====
+  const handleLoginSuccess = async (cred) => {
     setLoading(true);
     try {
-      const authResponse = await authGoogle(credentialResponse.credential);
-      const userData = authResponse.data.user || authResponse.data;
-      setUser({ ...userData, lastChannelId: null });
-
-      const statusResponse = await getUserStatus(userData.email);
-      setPaid(statusResponse.data.paid || false);
-
-      setError('');
-      setShowLogin(false);
+      const response = await authGoogle(cred.credential);
+      const userData = response.data.user || response.data;
+      setUser(userData);
+      localStorage.setItem("authToken", cred.credential);
+      const status = await getCurrentUser(cred.credential);
+      setPaid(status.data.paid);
       setShowChannelPrompt(true);
-      setChannelInput('');
-      toast.success('Logged in successfully!');
+      toast.success("Logged in successfully!");
     } catch (err) {
-      console.error('Auth error details:', {
-        message: err.message,
-        response: err.response?.data,
-        status: err.response?.status,
-      });
-      const message = err.response?.data?.error || 'Failed to log in with Google.';
-      setError(message);
-      toast.error(message);
+      console.error(err);
+      toast.error("Login failed.");
     } finally {
       setLoading(false);
     }
   };
 
-  const handleLoginFailure = () => {
-    setError('Failed to log in with Google.');
-    toast.error('Failed to log in with Google.');
-    setShowLogin(false);
-    setLoading(false);
+  const handleLogout = () => {
+    setUser(null);
+    setPaid(false);
+    setResults([]);
+    setChannelInput("");
+    localStorage.removeItem("authToken");
+    toast.info("Logged out.");
   };
 
+  // ===== Handle Channel Check =====
   const handleChannelSubmit = async () => {
     if (!channelInput.trim()) {
-      setError('Channel ID is required to check links.');
-      toast.error('Channel ID is required.');
+      toast.error("Please enter a Channel ID.");
       return;
     }
     setLoading(true);
-    const maxRetries = 3;
-    const retryDelay = 5000;
-    let attempt = 0;
-
     try {
-      setUser((prev) => ({ ...prev, lastChannelId: channelInput }));
-      const maxVideos = paid ? -1 : 50;
-      let results;
-      while (attempt < maxRetries) {
-        try {
-          results = await apiCheckLinks(channelInput, maxVideos, setResults, (msg) => toast.error(msg));
-          setResults(results);
-          setShowChannelPrompt(false);
-          setCurrentPage(1);
-          toast.success('Check complete!');
-          break;
-        } catch (err) {
-          attempt++;
-          if (err.code === 'ECONNABORTED' || err.response?.status === 503) {
-            if (attempt === maxRetries) {
-              throw new Error('Check timed out after retries.');
-            }
-            console.log(`Attempt ${attempt} failed with timeout, retrying in ${retryDelay}ms...`);
-            await new Promise(resolve => setTimeout(resolve, retryDelay));
-          } else {
-            throw err;
-          }
-        }
-      }
-      if (!results) {
-        throw new Error('No results received after retries.');
-      }
+      const token = localStorage.getItem("authToken");
+      const res = await checkLinks(channelInput, paid ? -1 : 50, token);
+      const brokenLinks = res.data.result?.brokenLinks || [];
+      const total = res.data.result?.totalVideos || 0;
+      setResults(brokenLinks);
+      setTotalVideos(total);
+      toast.success(`Checked ${paid ? "all" : "first 50"} videos!`);
     } catch (err) {
-      const message = err.message || 'Failed to check links.';
-      setError(message);
-      toast.error(message);
+      console.error(err);
+      toast.error("Failed to check links.");
     } finally {
       setLoading(false);
     }
   };
 
-  const handlePayment = (plan) => {
-    setSelectedPlan(plan);
-    setShowPaymentModal(true);
+  // ===== Stripe Payment Redirect =====
+  const handleSubscribe = async (plan) => {
+    try {
+      const token = localStorage.getItem("authToken");
+      const res = await createCheckoutSession(plan, token);
+      window.location.href = res.data.url; // redirect to Stripe Checkout
+    } catch (err) {
+      console.error(err);
+      toast.error("Payment setup failed.");
+    }
   };
 
-  const handlePaymentSuccess = () => {
-    setShowPaymentModal(false);
-    setPaid(true); // Update paid status after success
-    setSelectedPlan(null);
-    toast.success('Payment successful! Checking unlimited links is now enabled.');
-  };
-
-  const handlePaymentClose = () => {
-    setShowPaymentModal(false);
-    setSelectedPlan(null);
-  };
-
+  // ===== Pagination =====
   const indexOfLastItem = currentPage * itemsPerPage;
   const indexOfFirstItem = indexOfLastItem - itemsPerPage;
   const currentResults = results.slice(indexOfFirstItem, indexOfLastItem);
   const totalPages = Math.ceil(results.length / itemsPerPage);
+  const paginate = (page) => setCurrentPage(page);
 
-  const paginate = (pageNumber) => setCurrentPage(pageNumber);
+  // ===== Paywall condition =====
+  const shouldShowPaywall =
+   !paid && ((results.length > 0) || (results.length === 0 && totalVideos > 50));
+
 
   return (
     <div className="app-wrapper">
       <ToastContainer position="top-right" autoClose={4000} />
-      <div className="container">
-        <div className="card">
-          <div className="logo-placeholder">
-            <div className="logo">AffiliateBot</div>
+      <div className="container mt-4">
+        {/* Account Dropdown (only for paid users) */}
+        {user && paid && (
+          <div style={{ position: "absolute", top: 10, left: 10 }}>
+            <AccountDropdown user={user} onLogout={handleLogout} />
           </div>
+        )}
 
-          <h1 className="heading">Welcome to AffiliateBot</h1>
-          <p className="instructions">
-            Click the button below to log in with your YouTube account and check for broken affiliate links in your videos.
-          </p>
+        <div className="card p-4 shadow">
+          <h1 className="text-center mb-3">AffiliateBot</h1>
 
           {!user ? (
-            <div>
-              <div className="mt-3">
-                <GoogleLogin
-                  onSuccess={handleLoginSuccess}
-                  onError={handleLoginFailure}
-                  scope="https://www.googleapis.com/auth/youtube.readonly"
-                  text="signin_with"
-                  shape="rectangular"
-                  theme="filled_blue"
-                />
-              </div>
+            <div className="text-center">
+              <p>Sign in to start checking your YouTube affiliate links.</p>
+              <GoogleLogin
+                onSuccess={handleLoginSuccess}
+                onError={() => toast.error("Google login failed.")}
+                scope="https://www.googleapis.com/auth/youtube.readonly"
+                text="signin_with"
+              />
             </div>
           ) : (
-            <div>
-              <p className="logged-in">Logged in as {user.email}</p>
-              <button
-                className="logout-btn"
-                onClick={() => {
-                  setUser(null);
-                  setResults([]);
-                  setError('');
-                  setPaid(false);
-                  toast.info('Logged out.');
-                }}
-              >
+            <div className="text-center">
+              <p>Logged in as {user.email}</p>
+              <button className="btn btn-outline-danger" onClick={handleLogout}>
                 Log Out
               </button>
             </div>
           )}
 
-          {loading && <p className="loading">Checking links...</p>}
-          {error && <p className="error">{error}</p>}
-          {results.length === 0 && !error && user && !loading && (
-            <p className="no-results">No broken links found.</p>
-          )}
-
-          {showChannelPrompt && (
-            <div className="channel-prompt">
-              <h2 className="heading">Enter Your Channel ID</h2>
+          {user && showChannelPrompt && (
+            <div className="mt-4">
+              <h5>Enter Your YouTube Channel ID</h5>
               <input
                 type="text"
-                className="channel-input"
+                className="form-control mb-2"
+                placeholder="e.g. UC1234567890"
                 value={channelInput}
                 onChange={(e) => setChannelInput(e.target.value)}
-                placeholder="e.g., UC1234567890"
               />
-              <p className="channel-help">
-                Don’t know your Channel ID?{' '}
-                <a
-                  href="https://support.google.com/youtube/answer/3250431"
-                  target="_blank"
-                  rel="noopener noreferrer"
-                >
-                  Find it here
-                </a>.
-              </p>
               <button
-                className="btn btn-primary mt-3"
+                className="btn btn-primary"
                 onClick={handleChannelSubmit}
                 disabled={loading}
               >
-                {loading ? 'Checking...' : 'Submit'}
+                {loading ? "Checking..." : "Check Links"}
               </button>
             </div>
           )}
 
-          {results.length > 0 && !paid && (
-            <div className="paywall">
-              <p>{results.length} broken links found. Please subscribe to view details:</p>
-              <button
-                className="btn btn-success stylish-btn me-2"
-                onClick={() => handlePayment('monthly')}
-                style={{
-                  padding: '10px 20px',
-                  background: 'linear-gradient(45deg, #28a745, #218838)',
-                  border: 'none',
-                  boxShadow: '0 4px 8px rgba(0,0,0,0.2)',
-                  transition: 'all 0.3s',
-                }}
-                onMouseOver={(e) => (e.target.style.transform = 'scale(1.05)')}
-                onMouseOut={(e) => (e.target.style.transform = 'scale(1)')}
-              >
-                $14.99/month
-              </button>
-              <button
-                className="btn btn-success stylish-btn"
-                onClick={() => handlePayment('yearly')}
-                style={{
-                  padding: '10px 20px',
-                  background: 'linear-gradient(45deg, #28a745, #218838)',
-                  border: 'none',
-                  boxShadow: '0 4px 8px rgba(0,0,0,0.2)',
-                  transition: 'all 0.3s',
-                }}
-                onMouseOver={(e) => (e.target.style.transform = 'scale(1.05)')}
-                onMouseOut={(e) => (e.target.style.transform = 'scale(1)')}
-              >
-                $99.99/year
-              </button>
-              <p className="promise">Coming soon: Automated daily checks will be emailed to you!</p>
-            </div>
-          )}
-
-          {results.length > 0 && paid && (
-            <div className="results-table">
-              <table className="table">
+          {results.length > 0 && !shouldShowPaywall && (
+            <div className="mt-4">
+              <h5>Broken Links</h5>
+              <table className="table table-striped">
                 <thead>
                   <tr>
-                    <th>Video URL</th>
+                    <th>Video</th>
                     <th>Broken Link</th>
                   </tr>
                 </thead>
                 <tbody>
-                  {currentResults.map((result, index) => (
-                    <tr key={index}>
+                  {currentResults.map((r, i) => (
+                    <tr key={i}>
                       <td>
                         <a
-                          href={`https://www.youtube.com/watch?v=${result.videoId}`}
+                          href={`https://www.youtube.com/watch?v=${r.videoId}`}
                           target="_blank"
                           rel="noopener noreferrer"
-                          className="table-link"
                         >
-                          Watch Video
+                          View Video
                         </a>
                       </td>
-                      <td>
+                      <td style={{ wordBreak: "break-all" }}>
                         <a
-                          href={result.link}
+                          href={r.link}
                           target="_blank"
                           rel="noopener noreferrer"
-                          className="table-link"
-                          style={{ wordBreak: 'break-all' }}
                         >
-                          {result.link}
+                          {r.link}
                         </a>
                       </td>
                     </tr>
                   ))}
                 </tbody>
               </table>
-              <div className="pagination" style={{ marginTop: '1rem', textAlign: 'center' }}>
-                <button
-                  className="btn btn-secondary"
-                  onClick={() => paginate(currentPage - 1)}
-                  disabled={currentPage === 1}
-                  style={{ marginRight: '0.5rem' }}
-                >
-                  Previous
-                </button>
-                <span>
-                  Page {currentPage} of {totalPages}
-                </span>
-                <button
-                  className="btn btn-secondary"
-                  onClick={() => paginate(currentPage + 1)}
-                  disabled={currentPage === totalPages}
-                  style={{ marginLeft: '0.5rem' }}
-                >
-                  Next
-                </button>
-              </div>
+
+              {totalPages > 1 && (
+                <div className="text-center mt-3">
+                  <button
+                    className="btn btn-secondary me-2"
+                    disabled={currentPage === 1}
+                    onClick={() => paginate(currentPage - 1)}
+                  >
+                    Prev
+                  </button>
+                  <span>
+                    Page {currentPage} of {totalPages}
+                  </span>
+                  <button
+                    className="btn btn-secondary ms-2"
+                    disabled={currentPage === totalPages}
+                    onClick={() => paginate(currentPage + 1)}
+                  >
+                    Next
+                  </button>
+                </div>
+              )}
             </div>
           )}
 
-          {showPaymentModal && user && (
-            <div className="modal" style={{ position: 'fixed', top: 0, left: 0, right: 0, bottom: 0, backgroundColor: 'rgba(0,0,0,0.5)', display: 'flex', justifyContent: 'center', alignItems: 'center', zIndex: 1000 }}>
-              <div style={{ backgroundColor: 'white', padding: '20px', borderRadius: '5px', maxWidth: '500px', width: '100%' }}>
-                <PaymentModal
-                  user={user}
-                  plan={selectedPlan}
-                  onSuccess={handlePaymentSuccess}
-                  onClose={handlePaymentClose}
-                />
+          {shouldShowPaywall && (
+            <div className="text-center mt-4">
+              <h5>Unlock Full Access</h5>
+              <p>
+                Subscribe to view all broken links and check every video on your
+                channel.
+              </p>
+              <div>
+                <button
+                  className="btn btn-success me-2"
+                  onClick={() => handleSubscribe("monthly")}
+                >
+                  $14.99 / month
+                </button>
+                <button
+                  className="btn btn-outline-success"
+                  onClick={() => handleSubscribe("yearly")}
+                >
+                  $99.99 / year
+                </button>
               </div>
             </div>
           )}
         </div>
 
-        <footer className="footer bg-dark text-white text-center py-3">
-          <p className="mb-0">
-            This website was made by{' '}
-            <a
-              href="https://workingrobotsinc.com"
-              target="_blank"
-              rel="noopener noreferrer"
-              className="text-info"
-            >
-              WorkingRobots Inc.
-            </a>
-          </p>
+        <footer className="text-center text-muted mt-4 mb-3">
+          Made by{" "}
+          <a
+            href="https://workingrobotsinc.com"
+            target="_blank"
+            rel="noopener noreferrer"
+          >
+            WorkingRobots Inc.
+          </a>
+          
         </footer>
       </div>
     </div>

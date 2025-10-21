@@ -1,285 +1,246 @@
+// server.js
 require('dotenv').config();
+
 const fs = require('fs');
-const fetch = require('node-fetch');
+const path = require('path');
 const express = require('express');
-const { spawn } = require('child_process');
-const { Pool } = require('pg');
 const cors = require('cors');
+const { Pool } = require('pg');
+const { spawn } = require('child_process');
 const { google } = require('googleapis');
 const { OAuth2Client } = require('google-auth-library');
-const stripe = require('stripe')(process.env.STRIPE_SECRET_KEY);
-const path = require('path'); // Added for serving static files
+const Stripe = require('stripe');
 const { v4: uuidv4 } = require('uuid');
 
 const app = express();
-app.use(cors());
-app.use(express.json());
-app.use(express.raw({ type: 'application/json' })); // For Stripe webhooks
 
-const jobs = {}; // temporary in-memory job tracker
-
+// ======== CORS ========
 const allowedOrigins = [
   'https://www.affiliatesbot.com',
-  'http://localhost:3000', // for local React dev
+  'http://localhost:3000',
 ];
-
-app.use(
-  cors({
-    origin: function (origin, callback) {
-      if (!origin || allowedOrigins.includes(origin)) {
-        callback(null, true);
-      } else {
-        callback(new Error('CORS not allowed for this origin'));
-      }
-    },
-    methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
-    allowedHeaders: ['Content-Type', 'Authorization'],
-    credentials: true,
-  })
-);
-
-// ---------------- PostgreSQL ----------------
-const pool = new Pool({
-  connectionString: process.env.DATABASE_URL, // Use Heroku's DATABASE_URL
-  ssl: {
-    rejectUnauthorized: false, // Required for Heroku Postgres SSL
+app.use(cors({
+  origin(origin, cb) {
+    if (!origin || allowedOrigins.includes(origin)) cb(null, true);
+    else cb(new Error('CORS not allowed for this origin'));
   },
+  credentials: true,
+}));
+
+// ======== Core Setup ========
+const stripe = Stripe(process.env.STRIPE_SECRET_KEY);
+const googleClient = new OAuth2Client(process.env.GOOGLE_CLIENT_ID);
+const pool = new Pool({
+  connectionString: process.env.DATABASE_URL,
+  ssl: { rejectUnauthorized: false },
 });
 
+const FRONTEND_URL = process.env.FRONTEND_URL || 'http://localhost:3000';
+const MONTHLY_PRICE_ID = process.env.STRIPE_MONTHLY_PRICE_ID;
+const YEARLY_PRICE_ID = process.env.STRIPE_YEARLY_PRICE_ID;
+
+// ======== Body Parsers ========
+app.use('/api/webhook', express.raw({ type: 'application/json' }));
+app.use(express.json());
+
+// ======== Safe DB Initialization ========
 async function initializeDatabase() {
-  try {
-    const schema = fs.readFileSync('schema.sql', 'utf8');
-    await pool.query(schema);
-    console.log('Database schema applied successfully');
-  } catch (err) {
-    console.error('Error applying schema:', err.message);
-    // Ignore "already exists" errors to avoid crashes on redeploy
-    if (!err.message.includes('already exists')) {
-      process.exit(1); // Exit if critical error
-    }
-  }
+  const schema = fs.readFileSync('schema.sql', 'utf8');
+  await pool.query(schema);
+  console.log('✅ Schema verified');
 }
+initializeDatabase().catch(err => console.error('DB init error', err));
 
-
-// ---------------- Google OAuth ----------------
-const oauth2Client = new google.auth.OAuth2(
-  process.env.GOOGLE_CLIENT_ID,
-  process.env.GOOGLE_CLIENT_SECRET,
-  'https://www.affiliatesbot.com/api/auth/google/callback' // Updated to production domain
-);
-
-app.post('/api/auth/google', async (req, res) => {
-  const { token } = req.body;
-  if (!token) return res.status(400).json({ error: 'Missing token' });
+// ======== Google Auth ========
+async function verifySession(req) {
+  const auth = req.headers.authorization || '';
+  const [, token] = auth.split(' ');
+  if (!token) return null;
 
   try {
-    const client = new OAuth2Client(process.env.GOOGLE_CLIENT_ID);
-    client._httpClient = { fetch: fetch };
-    const ticket = await client.verifyIdToken({
+    const ticket = await googleClient.verifyIdToken({
       idToken: token,
       audience: process.env.GOOGLE_CLIENT_ID,
     });
     const payload = ticket.getPayload();
     const email = payload.email;
-    const sub = payload.sub;
 
-    const user = { email, sub };
-    res.json({ user });
+    const { rows } = await pool.query(
+      `INSERT INTO users (email)
+       VALUES ($1)
+       ON CONFLICT (email) DO UPDATE SET email = EXCLUDED.email
+       RETURNING *`,
+      [email]
+    );
+    return rows[0];
   } catch (err) {
-    console.error('OAuth Error:', err.message);
-    res.status(500).json({ error: err.message });
+    console.error('Auth error:', err.message);
+    return null;
   }
-});
+}
 
-// ---------------- YouTube Video Count ----------------
+// ======== YouTube Helper ========
 async function getTotalVideoCount(channelId) {
-  const youtube = google.youtube({
-    version: 'v3',
-    auth: process.env.YOUTUBE_API_KEY,
-  });
+  const youtube = google.youtube({ version: 'v3', auth: process.env.YOUTUBE_API_KEY });
   try {
-    const response = await youtube.channels.list({
-      part: 'statistics',
-      id: channelId,
-    });
-    if (response.data.items.length > 0) {
-      return parseInt(response.data.items[0].statistics.videoCount, 10) || 50;
-    }
-    return 50;
-  } catch (err) {
-    console.error('Error fetching video count:', err.message);
+    const r = await youtube.channels.list({ part: 'statistics', id: channelId });
+    const count = parseInt(r.data.items?.[0]?.statistics?.videoCount || '50', 10);
+    return Number.isFinite(count) ? count : 50;
+  } catch {
     return 50;
   }
 }
 
-// ---------------- Broken Link Checker ----------------
-app.post('/api/check-links', (req, res) => {
+// ======== Link Checker ========
+const jobs = {};
+app.post('/api/check-links', async (req, res) => {
   const { channelId, maxVideos } = req.body;
   const jobId = uuidv4();
-
   jobs[jobId] = { status: 'running', result: null };
 
   const python = spawn('python3', ['check_links.py', channelId, maxVideos]);
-
   let output = '';
-  python.stdout.on('data', data => {
-    output += data.toString();
-  });
+  python.stdout.on('data', d => output += d.toString());
+  const totalVideosPromise = getTotalVideoCount(channelId);
 
-  python.on('close', code => {
+  python.on('close', async () => {
     try {
       const parsed = JSON.parse(output);
-      jobs[jobId] = { status: 'completed', result: parsed };
-    } catch (err) {
+      const totalVideos = await totalVideosPromise;
+      jobs[jobId] = { status: 'completed', result: { brokenLinks: parsed, totalVideos } };
+    } catch {
       jobs[jobId] = { status: 'error', result: { error: 'Invalid output' } };
     }
   });
 
-  res.json({ jobId }); // respond immediately before Heroku timeout
+  res.json({ jobId });
 });
 
-//ads polling status
 app.get('/api/check-links/status/:jobId', (req, res) => {
   const job = jobs[req.params.jobId];
   if (!job) return res.status(404).json({ error: 'Job not found' });
   res.json(job);
 });
 
-
-// ---------------- Stripe Integration ----------------
-app.post('/api/create-customer', async (req, res) => {
-  const { email } = req.body;
-  try {
-    let customer = await stripe.customers.list({ email, limit: 1 });
-    if (customer.data.length === 0) {
-      customer = await stripe.customers.create({ email });
-    } else {
-      customer = customer.data[0];
-    }
-
-    await pool.query(
-      `INSERT INTO users (email, stripe_customer_id)
-       VALUES ($1, $2)
-       ON CONFLICT (email)
-       DO UPDATE SET stripe_customer_id = EXCLUDED.stripe_customer_id`,
-      [email, customer.id]
-    );
-
-    res.json({ customerId: customer.id });
-  } catch (err) {
-    console.error('Stripe create-customer error:', err.message);
-    res.status(500).json({ error: err.message });
-  }
+// ======== /api/me ========
+app.get('/api/me', async (req, res) => {
+  const user = await verifySession(req);
+  if (!user) return res.status(401).json({ error: 'Unauthorized' });
+  res.json(user);
 });
 
+// ======== Create Checkout Session ========
 app.post('/api/create-checkout-session', async (req, res) => {
-  const { customerId, plan } = req.body;
-  try {
-    console.log('Creating Payment Intent with customerId:', customerId, 'plan:', plan);
-    console.log('Env vars:', {
-      monthlyPriceId: process.env.STRIPE_MONTHLY_PRICE_ID,
-      yearlyPriceId: process.env.STRIPE_YEARLY_PRICE_ID,
+  const user = await verifySession(req);
+  if (!user) return res.status(401).json({ error: 'Unauthorized' });
+
+  const { plan } = req.body;
+  const priceId = plan === 'yearly' ? YEARLY_PRICE_ID : MONTHLY_PRICE_ID;
+
+  let custId = user.stripe_customer_id;
+  if (!custId) {
+    const customer = await stripe.customers.create({
+      email: user.email,
+      metadata: { userId: String(user.id) },
     });
-    const amount = plan === 'monthly' ? 1499 : 9999; // $14.99 or $99.99 in cents
-    const paymentIntent = await stripe.paymentIntents.create({
-      customer: customerId,
-      amount: amount,
-      currency: 'usd',
-      automatic_payment_methods: {
-        enabled: true,
-      },
-      metadata: { plan },
-    });
-    console.log('Stripe API response:', paymentIntent);
-    if (!paymentIntent.client_secret) {
-      throw new Error('Payment Intent created but client_secret is missing');
-    }
-    res.json({ clientSecret: paymentIntent.client_secret, sessionId: paymentIntent.id });
-  } catch (err) {
-    console.error('Stripe payment error:', err.message, err.stack);
-    res.status(500).json({ error: err.message });
+    custId = customer.id;
+    await pool.query('UPDATE users SET stripe_customer_id = $1 WHERE id = $2', [custId, user.id]);
   }
+
+  const session = await stripe.checkout.sessions.create({
+    mode: 'subscription',
+    customer: custId,
+    customer_email: user.email,
+    line_items: [{ price: priceId, quantity: 1 }],
+    success_url: `${FRONTEND_URL}/?session_id={CHECKOUT_SESSION_ID}`,
+    cancel_url: `${FRONTEND_URL}/payment-cancelled`,
+  });
+
+  res.json({ url: session.url });
 });
 
+// ======== Cancel Subscription ========
+app.post('/api/cancel-subscription', async (req, res) => {
+  const user = await verifySession(req);
+  if (!user) return res.status(401).json({ error: 'Unauthorized' });
+
+  const subs = await stripe.subscriptions.list({
+    customer: user.stripe_customer_id,
+    status: 'active',
+    limit: 1,
+  });
+
+  if (!subs.data.length) return res.status(400).json({ error: 'No active subscription' });
+
+  await stripe.subscriptions.update(subs.data[0].id, { cancel_at_period_end: true });
+  await pool.query('UPDATE users SET paid = FALSE WHERE id = $1', [user.id]);
+
+  res.json({ success: true });
+});
+
+// ======== Webhook ========
 app.post('/api/webhook', async (req, res) => {
   const sig = req.headers['stripe-signature'];
-  try {
-    const event = stripe.webhooks.constructEvent(
-      req.body,
-      sig,
-      process.env.STRIPE_WEBHOOK_SECRET
-    );
+  let event;
 
+  try {
+    event = stripe.webhooks.constructEvent(req.body, sig, process.env.STRIPE_WEBHOOK_SECRET);
+  } catch (err) {
+    console.error('Webhook error:', err.message);
+    return res.status(400).send(`Webhook Error: ${err.message}`);
+  }
+
+  try {
     if (event.type === 'checkout.session.completed') {
       const session = event.data.object;
-      const userResult = await pool.query(
-        'SELECT id FROM users WHERE stripe_customer_id = $1',
-        [session.customer]
-      );
-      const userId = userResult.rows[0]?.id;
+      const email = session.customer_details?.email;
 
-      if (userId) {
+      if (session.subscription && email) {
+        // Fetch subscription details to get period end
+        const subscription = await stripe.subscriptions.retrieve(session.subscription);
+        const periodEnd = new Date(subscription.current_period_end * 1000).toISOString();
+
         await pool.query(
-          `INSERT INTO subscriptions (user_id, stripe_subscription_id, plan_type, status)
-           VALUES ($1, $2, $3, $4)
-           ON CONFLICT (stripe_subscription_id)
-           DO UPDATE SET status = EXCLUDED.status`,
-          [
-            userId,
-            session.subscription,
-            session.metadata?.plan || 'unknown',
-            'active',
-          ]
+          `UPDATE users
+           SET paid = TRUE,
+               stripe_subscription_id = $1,
+               subscription_end = $2
+           WHERE email = $3`,
+          [subscription.id, periodEnd, email]
         );
+
+        console.log(`✅ Marked ${email} as paid until ${periodEnd}`);
       }
     }
 
-    res.json({ received: true });
+    if (event.type === 'customer.subscription.deleted') {
+      const sub = event.data.object;
+      await pool.query(
+        'UPDATE users SET paid = FALSE, subscription_end = NULL WHERE stripe_customer_id = $1',
+        [sub.customer]
+      );
+    }
+
+    if (event.type === 'invoice.payment_failed') {
+      const inv = event.data.object;
+      await pool.query(
+        'UPDATE users SET paid = FALSE WHERE stripe_customer_id = $1',
+        [inv.customer]
+      );
+    }
+
   } catch (err) {
-    console.error('Webhook error:', err.message);
-    res.status(400).json({ error: err.message });
+    console.error('Webhook handling failed:', err.message);
   }
+
+  res.json({ received: true });
 });
 
-app.get('/api/user-status', async (req, res) => {
-  const { email } = req.query;
-  try {
-    const result = await pool.query(
-      `SELECT EXISTS (
-         SELECT 1
-         FROM subscriptions
-         WHERE user_id = (SELECT id FROM users WHERE email = $1)
-         AND status = 'active'
-       ) AS paid`,
-      [email]
-    );
-    res.json({ paid: result.rows[0].paid });
-  } catch (err) {
-    console.error('User status error:', err.message);
-    res.status(500).json({ error: err.message });
-  }
+
+// ======== Serve Frontend ========
+app.use(express.static(path.join(__dirname, '../build')));
+app.get('*', (_, res) => {
+  res.sendFile(path.join(__dirname, '../build/index.html'));
 });
 
-app.post('/api/verify-payment', async (req, res) => {
-  const { sessionId } = req.body;
-  try {
-    const session = await stripe.checkout.sessions.retrieve(sessionId);
-    res.json({ paid: session.payment_status === 'paid' });
-  } catch (err) {
-    console.error('Verify payment error:', err.message);
-    res.status(500).json({ error: err.message });
-  }
-});
-
-// ---------------- Serve Frontend ----------------
-app.use(express.static(path.join(__dirname, '../build'))); // Serve static files from build folder
-app.get('*', (req, res) => {
-  res.sendFile(path.join(__dirname, '../build', 'index.html')); // Catch-all for React routing
-});
-
-// ---------------- Start Server ----------------
-initializeDatabase().then(() => {
-  app.listen(process.env.PORT || 3001, () => {
-    console.log('✅ AffiliateBot server running on http://localhost:3001 or Heroku port');
-  });
-});
+app.listen(process.env.PORT || 3001, () => console.log('✅ Server started.'));

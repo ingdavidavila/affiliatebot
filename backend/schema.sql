@@ -1,12 +1,14 @@
-
-CREATE TABLE users (
+CREATE TABLE IF NOT EXISTS users (
   id SERIAL PRIMARY KEY,
   email VARCHAR(255) UNIQUE NOT NULL,
   stripe_customer_id VARCHAR(255) UNIQUE,
+  stripe_subscription_id VARCHAR(255),
+  paid BOOLEAN DEFAULT FALSE,
+  subscription_end TIMESTAMP,   
   created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
 
-CREATE TABLE subscriptions (
+CREATE TABLE IF NOT EXISTS subscriptions (
   id SERIAL PRIMARY KEY,
   user_id INTEGER REFERENCES users(id) ON DELETE CASCADE,
   stripe_subscription_id VARCHAR(255) UNIQUE NOT NULL,
@@ -16,7 +18,7 @@ CREATE TABLE subscriptions (
   UNIQUE (user_id, stripe_subscription_id)
 );
 
-CREATE TABLE broken_links (
+CREATE TABLE IF NOT EXISTS broken_links (
   id SERIAL PRIMARY KEY,
   channel_id VARCHAR(255) NOT NULL,
   video_id VARCHAR(255) NOT NULL,
