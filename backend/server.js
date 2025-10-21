@@ -79,6 +79,40 @@ async function verifySession(req) {
   }
 }
 
+app.post('/api/auth/google', async (req, res) => {
+  const { token } = req.body;
+  if (!token) return res.status(400).json({ error: 'Missing token' });
+
+  try {
+    const ticket = await googleClient.verifyIdToken({
+      idToken: token,
+      audience: process.env.GOOGLE_CLIENT_ID,
+    });
+    const payload = ticket.getPayload();
+    const email = payload.email;
+
+    const { rows } = await pool.query(
+      `INSERT INTO users (email)
+       VALUES ($1)
+       ON CONFLICT (email)
+       DO UPDATE SET email = EXCLUDED.email
+       RETURNING *`,
+      [email]
+    );
+
+    const user = rows[0];
+
+    // Include paid status from the users table
+    const paid = user.paid || false;
+
+    res.json({ user: { email: user.email, paid } });
+  } catch (err) {
+    console.error('OAuth Error:', err.message);
+    res.status(500).json({ error: 'Failed to verify Google token' });
+  }
+});
+
+
 // ======== YouTube Helper ========
 async function getTotalVideoCount(channelId) {
   const youtube = google.youtube({ version: 'v3', auth: process.env.YOUTUBE_API_KEY });
