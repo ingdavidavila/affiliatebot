@@ -33,10 +33,14 @@ const pool = new Pool({
 });
 const redisUrl = process.env.REDIS_URL;
 if (!redisUrl) {
-  console.error('REDIS_URL not set, queue will not function. Check Heroku addon status.');
-  process.exit(1); // Exit if Redis is unavailable
+  console.error('REDIS_URL not set, exiting.');
+  process.exit(1);
 }
 const linkCheckQueue = new Queue('link-check', redisUrl);
+console.log('Queue initialized with REDIS_URL:', redisUrl);
+linkCheckQueue.on('error', (err) => {
+  console.error('Queue error:', err);
+});
 
 const FRONTEND_URL = process.env.FRONTEND_URL || 'http://localhost:3000';
 const MONTHLY_PRICE_ID = process.env.STRIPE_MONTHLY_PRICE_ID;
@@ -130,37 +134,55 @@ async function getTotalVideoCount(channelId) {
 // ======== Link Checker with Queue ========
 linkCheckQueue.process('check-links', async (job) => {
   const { channelId, maxVideos } = job.data;
-  console.log(`Processing job ${job.id}: ${channelId}`);
+  console.log(`Starting job ${job.id} for channel ${channelId}`);
   try {
-    const python = spawn('python3', ['check_links.py', channelId, maxVideos]);
+    const pythonPath = path.join(__dirname, 'check_links.py'); // Explicit path
+    if (!fs.existsSync(pythonPath)) {
+      throw new Error(`Python script not found at ${pythonPath}`);
+    }
+    const python = spawn('python3', [pythonPath, channelId, maxVideos || 50], {
+      stdio: ['pipe', 'pipe', 'pipe'],
+      cwd: __dirname,
+      env: { ...process.env, PYTHONUNBUFFERED: '1' }, // Ensure buffered output
+    });
     let output = '';
-    python.stdout.on('data', (d) => (output += d.toString()));
-    python.stderr.on('data', (d) => console.error(`Job ${job.id} PYTHON ERROR:`, d.toString()));
+    python.stdout.on('data', (d) => {
+      output += d.toString();
+      console.log(`Job ${job.id} STDOUT: ${d.toString().trim()}`);
+    });
+    python.stderr.on('data', (d) => {
+      console.error(`Job ${job.id} STDERR: ${d.toString().trim()}`);
+    });
 
-    await new Promise((resolve, reject) => {
-      python.on('close', async (code) => {
+    const result = await new Promise((resolve, reject) => {
+      python.on('close', (code) => {
+        console.log(`Job ${job.id} closed with code ${code}`);
         if (code === 0) {
           try {
             const parsed = JSON.parse(output);
-            await job.update({
-              status: 'completed',
-              result: parsed.brokenLinks || [],
-            });
-            resolve();
+            resolve(parsed);
           } catch (parseErr) {
             console.error(`Job ${job.id} parse error:`, parseErr, output);
-            await job.update({ status: 'failed', error: 'Invalid output' });
             reject(parseErr);
           }
         } else {
-          await job.update({ status: 'failed', error: `Python exit code ${code}` });
-          reject(new Error(`Python failed with code ${code}`));
+          reject(new Error(`Python exited with code ${code}`));
         }
       });
-      python.on('error', reject);
+      python.on('error', (err) => {
+        console.error(`Job ${job.id} spawn error:`, err);
+        reject(err);
+      });
     });
+
+    await job.update({
+      status: 'completed',
+      result: result.brokenLinks || [],
+      totalVideos: result.totalVideos || 0,
+    });
+    console.log(`Completed job ${job.id} with ${result.brokenLinks?.length || 0} broken links`);
   } catch (err) {
-    console.error(`Job ${job.id} failed:`, err);
+    console.error(`Job ${job.id} failed:`, err.message);
     await job.update({ status: 'failed', error: err.message });
     throw err;
   }
