@@ -128,45 +128,57 @@ async function getTotalVideoCount(channelId) {
 }
 
 // ======== Link Checker with Queue ========
-linkCheckQueue.process(async (job) => {
+linkCheckQueue.process('check-links', async (job) => {
   const { channelId, maxVideos } = job.data;
-  console.log(`Processing job ${job.id} for channel ${channelId}`);
+  console.log(`Processing job ${job.id}: ${channelId}`);
   try {
-    const python = spawn('python3', ['check_links.py', channelId, maxVideos || 50]);
+    const python = spawn('python3', ['check_links.py', channelId, maxVideos]);
     let output = '';
     python.stdout.on('data', (d) => (output += d.toString()));
-    python.stderr.on('data', (d) => console.error(`PYTHON ERROR ${job.id}:`, d.toString()));
+    python.stderr.on('data', (d) => console.error(`Job ${job.id} PYTHON ERROR:`, d.toString()));
 
-    const totalVideosPromise = getTotalVideoCount(channelId);
     await new Promise((resolve, reject) => {
       python.on('close', async (code) => {
-        try {
-          const parsed = JSON.parse(output);
-          const totalVideos = await totalVideosPromise;
-          await job.update({
-            status: 'completed',
-            result: { brokenLinks: parsed.brokenLinks || [], totalVideos },
-          });
-          resolve();
-        } catch (err) {
-          console.error(`❌ Job ${job.id} parse error:`, err.message, output);
-          await job.update({ status: 'error', error: 'Invalid output' });
-          reject(err);
+        if (code === 0) {
+          try {
+            const parsed = JSON.parse(output);
+            await job.update({
+              status: 'completed',
+              result: parsed.brokenLinks || [],
+            });
+            resolve();
+          } catch (parseErr) {
+            console.error(`Job ${job.id} parse error:`, parseErr, output);
+            await job.update({ status: 'failed', error: 'Invalid output' });
+            reject(parseErr);
+          }
+        } else {
+          await job.update({ status: 'failed', error: `Python exit code ${code}` });
+          reject(new Error(`Python failed with code ${code}`));
         }
       });
+      python.on('error', reject);
     });
   } catch (err) {
-    console.error(`Job ${job.id} failed:`, err.message);
-    await job.update({ status: 'error', error: err.message });
+    console.error(`Job ${job.id} failed:`, err);
+    await job.update({ status: 'failed', error: err.message });
+    throw err;
   }
 });
 
 app.post('/api/check-links', async (req, res) => {
   const { channelId, maxVideos } = req.body;
-  if (!channelId) return res.status(400).json({ error: 'Channel ID is required' });
+  if (!channelId) {
+    return res.status(400).json({ error: 'Missing channelId' });
+  }
 
-  const job = await linkCheckQueue.add({ channelId, maxVideos });
-  res.json({ jobId: job.id });
+  try {
+    const job = await linkCheckQueue.add('check-links', { channelId, maxVideos });
+    res.json({ jobId: job.id, status: 'queued' });
+  } catch (err) {
+    console.error('Queue add error:', err);
+    res.status(500).json({ error: 'Failed to queue job' });
+  }
 });
 
 app.get('/api/check-links/status/:jobId', async (req, res) => {
