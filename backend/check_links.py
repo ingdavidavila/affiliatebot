@@ -118,13 +118,21 @@ def main(channel_id, max_videos):
     return broken_links
 
 if __name__ == "__main__":
+    import sys, json
     if len(sys.argv) < 3:
         print(json.dumps({"error": "Usage: python check_links.py <channel_id> <max_videos>"}))
+        sys.stdout.flush()
         sys.exit(1)
+
     channel_id, max_videos = sys.argv[1], int(sys.argv[2])
     try:
         broken_links = main(channel_id, max_videos)
-        print(json.dumps({"brokenLinks": broken_links}))  # <-- Only one JSON print
+        print(json.dumps({"brokenLinks": broken_links}))  # Only one JSON output
+        sys.stdout.flush()  # ✅ ensure Node receives it
     except Exception as e:
         print(json.dumps({"error": str(e)}))
+        sys.stdout.flush()  # ✅ ensure error message is sent too
+        sys.exit(1)
+
     sys.exit(0)
+

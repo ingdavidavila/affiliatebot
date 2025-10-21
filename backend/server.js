@@ -135,17 +135,23 @@ app.post('/api/check-links', async (req, res) => {
   const python = spawn('python3', ['check_links.py', channelId, maxVideos]);
   let output = '';
   python.stdout.on('data', d => output += d.toString());
+  python.stderr.on('data', (d) => console.error('PYTHON ERROR:', d.toString()));
   const totalVideosPromise = getTotalVideoCount(channelId);
 
-  python.on('close', async () => {
-    try {
-      const parsed = JSON.parse(output);
-      const totalVideos = await totalVideosPromise;
-      jobs[jobId] = { status: 'completed', result: { brokenLinks: parsed, totalVideos } };
-    } catch {
-      jobs[jobId] = { status: 'error', result: { error: 'Invalid output' } };
-    }
-  });
+  python.on('close', async (code) => {
+  try {
+    const parsed = JSON.parse(output);
+    const totalVideos = await totalVideosPromise;
+    jobs[jobId] = {
+      status: 'completed',
+      result: { brokenLinks: parsed, totalVideos },
+    };
+    console.log(`✅ Job ${jobId} completed with ${parsed.length} broken links`);
+  } catch (err) {
+    console.error('❌ Python output parse error:', err.message, output);
+    jobs[jobId] = { status: 'error', result: { error: 'Invalid output' } };
+  }
+});
 
   res.json({ jobId });
 });
