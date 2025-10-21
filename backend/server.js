@@ -157,10 +157,31 @@ app.post('/api/check-links', async (req, res) => {
 });
 
 app.get('/api/check-links/status/:jobId', (req, res) => {
-  const job = jobs[req.params.jobId];
-  if (!job) return res.status(404).json({ error: 'Job not found' });
-  res.json(job);
+  const { jobId } = req.params;
+  const job = jobs[jobId];
+
+  if (!job) {
+    return res.status(404).json({ status: 'not_found' });
+  }
+
+  if (job.status === 'completed') {
+    return res.json({
+      status: 'completed',
+      result: job.result,
+    });
+  }
+
+  if (job.status === 'error') {
+    return res.status(500).json({
+      status: 'error',
+      result: job.result,
+    });
+  }
+
+  // Still running
+  res.json({ status: 'running' });
 });
+
 
 // ======== /api/me ========
 app.get('/api/me', async (req, res) => {
