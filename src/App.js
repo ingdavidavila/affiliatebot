@@ -102,27 +102,56 @@ useEffect(() => {
   };
 
   // ===== Handle Channel Check =====
-  const handleChannelSubmit = async () => {
-    if (!channelInput.trim()) {
-      toast.error("Please enter a Channel ID.");
-      return;
+const handleChannelSubmit = async () => {
+  if (!channelInput.trim()) {
+    toast.error("Please enter a Channel ID.");
+    return;
+  }
+
+  setLoading(true);
+  try {
+    const token = localStorage.getItem("authToken");
+    toast.info("Analyzing your videos... this may take up to 30 seconds.");
+
+    // Start the link check job
+    const res = await checkLinks(channelInput, paid ? -1 : 50, token);
+    const jobId = res.data.jobId;
+    if (!jobId) throw new Error("Failed to start job.");
+
+    // Poll for job status (wait for Python script to finish)
+    let jobResult = null;
+    for (let i = 0; i < 30; i++) { // retry ~30s total
+      const statusRes = await getJobStatus(jobId, token);
+      const job = statusRes.data;
+      if (job.status === "completed") {
+        jobResult = job.result;
+        break;
+      } else if (job.status === "error") {
+        throw new Error(job.result?.error || "Job failed.");
+      }
+      await new Promise((r) => setTimeout(r, 1000)); // wait 1s between checks
     }
-    setLoading(true);
-    try {
-      const token = localStorage.getItem("authToken");
-      const res = await checkLinks(channelInput, paid ? -1 : 50, token);
-      const brokenLinks = res.data.result?.brokenLinks || [];
-      const total = res.data.result?.totalVideos || 0;
-      setResults(brokenLinks);
-      setTotalVideos(total);
+
+    if (!jobResult) throw new Error("Timed out waiting for job completion.");
+
+    const brokenLinks = jobResult.brokenLinks || [];
+    const total = jobResult.totalVideos || 0;
+    setResults(brokenLinks);
+    setTotalVideos(total);
+
+    if (brokenLinks.length === 0 && total > 50 && !paid) {
+      toast.info("No broken links found in the first 50. Subscribe to check your full library!");
+    } else {
       toast.success(`Checked ${paid ? "all" : "first 50"} videos!`);
-    } catch (err) {
-      console.error(err);
-      toast.error("Failed to check links.");
-    } finally {
-      setLoading(false);
     }
-  };
+
+  } catch (err) {
+    console.error("Check-links error:", err);
+    toast.error(err.message || "Failed to check links.");
+  } finally {
+    setLoading(false);
+  }
+};
 
   // ===== Stripe Payment Redirect =====
   const handleSubscribe = async (plan) => {
