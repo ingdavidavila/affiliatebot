@@ -88,7 +88,7 @@ setUser(userData);
 localStorage.setItem("authToken", response.data.token);
 
   const token = response.data.token;
-const stripeCheck = await axios.get(`${process.env.FRONTEND_URL}/api/stripe/status`, {
+  const stripeCheck = await axios.get(`${process.env.REACT_APP_API_URL}/api/stripe/status`, {
   headers: { Authorization: `Bearer ${token}` },
 });
 
