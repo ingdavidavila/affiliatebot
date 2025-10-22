@@ -180,9 +180,15 @@ app.post('/api/check-links', async (req, res) => {
 
   const jobId = uuidv4();
   jobs[jobId] = { status: 'running', result: null };
-  console.log(`Spawning Python with channelId: ${channelId}, maxVideos: ${maxVideos}, jobId: ${jobId}`);
+  // ✅ Handle -1 (paid users = check all videos)
+  const videoLimit =
+    maxVideos < 0 ? await getTotalVideoCount(channelId) : maxVideos;
 
-  const python = spawn('python3', ['check_links.py', channelId, maxVideos.toString()], {
+  console.log(
+    `Spawning Python with channelId: ${channelId}, maxVideos: ${videoLimit}, jobId: ${jobId}`
+  );
+
+  const python = spawn('python3', ['check_links.py', channelId, videoLimit.toString()], {
     env: { ...process.env, YOUTUBE_API_KEY: process.env.YOUTUBE_API_KEY },
   });
 
