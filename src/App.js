@@ -150,11 +150,18 @@ localStorage.setItem("authToken", response.data.token);
       setResults(brokenLinks);
       setTotalVideos(total);
       if (brokenLinks.length === 0) {
-    toast.success("✅ No broken links found!");
-    setShowChannelPrompt(false);
-    setLoading(false);
-    return;
-    }
+        toast.success(`✅ No broken links found across ${total} videos.`);
+        
+        // Hide the input and button
+        setShowChannelPrompt(false);
+
+        // Optionally show a message instead of the input form
+        setResults([{ message: "NO BROKEN LINKS FOUND" }]);
+
+        setLoading(false);
+        return;
+      }
+
       if (paid) {
   toast.success(`✅ Completed — checked all your videos.`);
 } else {
@@ -300,6 +307,14 @@ localStorage.setItem("authToken", response.data.token);
               </button>
             </div>
           )}
+
+          {!showChannelPrompt && results.length === 1 && results[0].message === "NO BROKEN LINKS FOUND" && (
+            <div className="text-center mt-4">
+            <h5 className="text-success">✅ No broken links found!</h5>
+            <p>Everything looks great on your channel 🎉</p>
+            </div>
+          )}
+
 
           {results.length > 0 && !shouldShowPaywall && (
             <div className="mt-4">
