@@ -331,25 +331,40 @@ app.post('/api/webhook', async (req, res) => {
 
   try {
     if (event.type === 'checkout.session.completed') {
-      const session = event.data.object;
-      const email = session.customer_details?.email;
+  const session = event.data.object;
+  const email = session.customer_details?.email;
 
-      if (session.subscription && email) {
-        // Fetch subscription details to get period end
-        const subscription = await stripe.subscriptions.retrieve(session.subscription);
-        const periodEnd = new Date(subscription.current_period_end * 1000).toISOString();
+  if (session.subscription && email) {
+    try {
+      // Retrieve subscription details
+      const subscription = await stripe.subscriptions.retrieve(session.subscription);
 
-        await pool.query(
-          `UPDATE users
-           SET paid = TRUE,
-               stripe_subscription_id = $1,
-               subscription_end = $2
-           WHERE email = $3`,
-          [subscription.id, periodEnd, email]
-        );
-
-        console.log(`✅ Marked ${email} as paid until ${periodEnd}`);
+      // Safely handle period end
+      let periodEnd = null;
+      if (subscription.current_period_end) {
+        try {
+          periodEnd = new Date(subscription.current_period_end * 1000).toISOString();
+        } catch (e) {
+          console.warn('⚠️ Could not parse current_period_end:', e.message);
+        }
       }
+
+      await pool.query(
+        `UPDATE users
+         SET paid = TRUE,
+             stripe_subscription_id = $1,
+             subscription_end = $2
+         WHERE email = $3`,
+        [subscription.id, periodEnd, email]
+      );
+
+      console.log(`✅ Marked ${email} as paid (subscription ${subscription.id})`);
+    } catch (err) {
+      console.error('Stripe check error:', err);
+    }
+  }
+
+
     }
 
     if (event.type === 'customer.subscription.deleted') {
