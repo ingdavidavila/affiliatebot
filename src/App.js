@@ -137,37 +137,52 @@ localStorage.setItem("authToken", response.data.token);
 
     // Step 2: Poll every 4 seconds for job completion
     const pollInterval = 4000;
-    const timeout = 180000; // 3 minutes
+    const timeout = 360000; // 3 minutes
     const startTime = Date.now();
 
     const poll = setInterval(async () => {
-      try {
-        const res = await getJobStatus(jobId);
-        if (res.data.status === "completed") {
-          clearInterval(poll);
-          const brokenLinks = res.data.result.brokenLinks || [];
-          const total = res.data.result.totalVideos || 0;
-          setResults(brokenLinks);
-          setTotalVideos(total);
-          toast.success(
-            `Completed — checked ${paid ? "all" : "first 50"} videos.`
-          );
-          setLoading(false);
-        } else if (res.data.status === "error") {
-          clearInterval(poll);
-          toast.error("Something went wrong while checking links.");
-          setLoading(false);
-        } else if (Date.now() - startTime > timeout) {
-          clearInterval(poll);
-          toast.error("Timed out waiting for link check to complete.");
-          setLoading(false);
-        }
-      } catch (err) {
+  try {
+    const res = await getJobStatus(jobId);
+    if (res.data.status === "completed") {
+      clearInterval(poll);
+      const brokenLinks = res.data.result.brokenLinks || [];
+      const total = res.data.result.totalVideos || 0;
+      setResults(brokenLinks);
+      setTotalVideos(total);
+      toast.success(
+        `Completed — checked ${paid ? "all" : "first 50"} videos.`
+      );
+      setLoading(false);
+    } else if (res.data.status === "error") {
+      clearInterval(poll);
+      toast.error("Something went wrong while checking links.");
+      setLoading(false);
+    } 
+    // 🕒 Extended timeout with one last grace check
+    else if (Date.now() - startTime > timeout) {
+      const finalRes = await getJobStatus(jobId);
+      if (finalRes.data.status === "completed") {
         clearInterval(poll);
-        toast.error("Polling failed — please try again.");
-        setLoading(false);
+        const brokenLinks = finalRes.data.result.brokenLinks || [];
+        const total = finalRes.data.result.totalVideos || 0;
+        setResults(brokenLinks);
+        setTotalVideos(total);
+        toast.success(
+          `Completed — checked ${paid ? "all" : "first 50"} videos.`
+        );
+      } else {
+        clearInterval(poll);
+        toast.error("Timed out waiting for link check to complete.");
       }
-    }, pollInterval);
+      setLoading(false);
+    }
+  } catch (err) {
+    clearInterval(poll);
+    toast.error("Polling failed — please try again.");
+    setLoading(false);
+  }
+}, pollInterval);
+
   } catch (err) {
     console.error("Error starting link check:", err);
     toast.error("Unable to start the link check.");
