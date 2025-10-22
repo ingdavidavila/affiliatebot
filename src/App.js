@@ -1,4 +1,3 @@
-require('dotenv').config();
 import React, { useState, useEffect } from "react";
 import { GoogleLogin } from "@react-oauth/google";
 import { ToastContainer, toast } from "react-toastify";
@@ -84,7 +83,7 @@ useEffect(() => {
   localStorage.setItem("authToken", cred.credential);
 
   // Immediately check Stripe status after login
-  const stripeCheck = await axios.get(`${process.env.FRONTEND_URL}/api/stripe/status`, {
+  const stripeCheck = await axios.get(`${process.env.REACT_APP_API_URL}/api/stripe/status`, {
     headers: { Authorization: `Bearer ${cred.credential}` },
   });
 
