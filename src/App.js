@@ -264,13 +264,27 @@ localStorage.setItem("authToken", response.data.token);
           {user && showChannelPrompt && (
             <div className="mt-4">
               <h5>Enter Your YouTube Channel ID</h5>
-              <input
-                type="text"
-                className="form-control mb-2"
-                placeholder="e.g. UC1234567890"
-                value={channelInput}
-                onChange={(e) => setChannelInput(e.target.value)}
-              />
+<p className="text-muted small mb-2">
+  👉 You can find your Channel ID by visiting{" "}
+  <a
+    href="https://www.youtube.com/account_advanced"
+    target="_blank"
+    rel="noopener noreferrer"
+  >
+    youtube.com/account_advanced
+  </a>{" "}
+  (under <b>“Channel ID”</b>) or by checking your channel URL — it usually looks like:
+  <code>https://www.youtube.com/channel/<b>UC1234567890ABCDE</b></code>
+</p>
+
+<input
+  type="text"
+  className="form-control mb-2"
+  placeholder="Paste your Channel ID (e.g. UC1234567890ABCDE)"
+  value={channelInput}
+  onChange={(e) => setChannelInput(e.target.value)}
+/>
+
               <button
                 className="btn btn-primary"
                 onClick={handleChannelSubmit}
