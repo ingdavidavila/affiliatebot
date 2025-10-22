@@ -150,19 +150,22 @@ localStorage.setItem("authToken", response.data.token);
       setResults(brokenLinks);
       setTotalVideos(total);
       if (paid) {
-  toast.success(`Completed — checked all your videos.`);
+  toast.success(`✅ Completed — checked all your videos.`);
 } else {
-  toast.info(
-    "✅ Checked your first 50 videos. Want to scan the rest?",
-    { autoClose: 5000 }
-  );
+  toast.info("✅ Checked your first 50 videos. Want to scan the rest?", {
+    autoClose: 5000,
+  });
 
-  // Trigger the paywall prompt immediately
-  setShowChannelPrompt(false);
+  // 👇 Force the paywall to show
+  setPaid(false);
+
+  // 👇 Smooth scroll to the paywall section
   setTimeout(() => {
-    setShowChannelPrompt(true);
-    setPaid(false); // explicitly ensure paywall shows
-  }, 200);
+    const paywallSection = document.getElementById("paywall-section");
+    if (paywallSection) {
+      paywallSection.scrollIntoView({ behavior: "smooth", block: "center" });
+    }
+  }, 800);
 }
 
       setLoading(false);
@@ -265,16 +268,12 @@ localStorage.setItem("authToken", response.data.token);
             <div className="mt-4">
               <h5>Enter Your YouTube Channel ID</h5>
 <p className="text-muted small mb-2">
-  👉 You can find your Channel ID by visiting{" "}
+  You can find your Channel ID by visiting{" "}
   <a
-    href="https://www.youtube.com/account_advanced"
+    href="https://support.google.com/youtube/answer/3250431?hl=en"
     target="_blank"
     rel="noopener noreferrer"
-  >
-    youtube.com/account_advanced
-  </a>{" "}
-  (under <b>“Channel ID”</b>) or by checking your channel URL — it usually looks like:
-  <code>https://www.youtube.com/channel/<b>UC1234567890ABCDE</b></code>
+  />
 </p>
 
 <input
@@ -356,7 +355,7 @@ localStorage.setItem("authToken", response.data.token);
           )}
 
           {shouldShowPaywall && (
-            <div className="text-center mt-4">
+            <div id="paywall-section" className="text-center mt-4">
               <h5>Unlock Full Access</h5>
               <p>
                 Subscribe to view all broken links and check every video on your
