@@ -218,16 +218,24 @@ app.get('/api/stripe/status', async (req, res) => {
 
     if (subs.data.length > 0) {
       const sub = subs.data[0];
-      const periodEnd = new Date(sub.current_period_end * 1000).toISOString();
+      let periodEnd = null;
+if (subscription && subscription.current_period_end) {
+  try {
+    periodEnd = new Date(subscription.current_period_end * 1000).toISOString();
+  } catch (e) {
+    console.warn('⚠️ Could not parse current_period_end:', e.message);
+  }
+}
 
-      await pool.query(
-        `UPDATE users
-         SET paid = TRUE,
-             stripe_subscription_id = $1,
-             subscription_end = $2
-         WHERE id = $3`,
-        [sub.id, periodEnd, user.id]
-      );
+await pool.query(
+  `UPDATE users
+   SET paid = TRUE,
+       stripe_subscription_id = $1,
+       subscription_end = $2
+   WHERE email = $3`,
+  [subscription.id, periodEnd, email]
+);
+console.log(`✅ Marked ${email} as paid (subscription ${subscription.id})`);
 
       return res.json({
         paid: true,
