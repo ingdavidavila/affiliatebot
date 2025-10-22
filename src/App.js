@@ -149,9 +149,22 @@ localStorage.setItem("authToken", response.data.token);
       const total = res.data.result.totalVideos || 0;
       setResults(brokenLinks);
       setTotalVideos(total);
-      toast.success(
-        `Completed — checked ${paid ? "all" : "first 50"} videos.`
-      );
+      if (paid) {
+  toast.success(`Completed — checked all your videos.`);
+} else {
+  toast.info(
+    "✅ Checked your first 50 videos. Want to scan the rest?",
+    { autoClose: 5000 }
+  );
+
+  // Trigger the paywall prompt immediately
+  setShowChannelPrompt(false);
+  setTimeout(() => {
+    setShowChannelPrompt(true);
+    setPaid(false); // explicitly ensure paywall shows
+  }, 200);
+}
+
       setLoading(false);
     } else if (res.data.status === "error") {
       clearInterval(poll);
