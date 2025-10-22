@@ -91,6 +91,7 @@ app.post('/api/auth/google', async (req, res) => {
     const payload = ticket.getPayload();
     const email = payload.email;
 
+    // Upsert user in DB
     const { rows } = await pool.query(
       `INSERT INTO users (email)
        VALUES ($1)
@@ -100,17 +101,60 @@ app.post('/api/auth/google', async (req, res) => {
       [email]
     );
 
-    const user = rows[0];
+    let user = rows[0];
 
-    // Include paid status from the users table
-    const paid = user.paid || false;
+    // ✅ If no Stripe customer ID stored, try to find one by email
+    if (!user.stripe_customer_id) {
+      const customers = await stripe.customers.list({ email, limit: 1 });
+      if (customers.data.length > 0) {
+        const customer = customers.data[0];
 
-    res.json({ user: { email: user.email, paid } });
+        // Save Stripe customer ID to DB
+        await pool.query(
+          `UPDATE users SET stripe_customer_id = $1 WHERE id = $2`,
+          [customer.id, user.id]
+        );
+        user.stripe_customer_id = customer.id;
+      }
+    }
+
+    // ✅ Now, check active subscriptions (whether new or existing)
+    if (user.stripe_customer_id) {
+      const subs = await stripe.subscriptions.list({
+        customer: user.stripe_customer_id,
+        status: 'active',
+        limit: 1,
+      });
+
+      if (subs.data.length > 0) {
+        const sub = subs.data[0];
+        const periodEnd = new Date(sub.current_period_end * 1000).toISOString();
+
+        await pool.query(
+          `UPDATE users
+           SET paid = TRUE,
+               stripe_subscription_id = $1,
+               subscription_end = $2
+           WHERE id = $3`,
+          [sub.id, periodEnd, user.id]
+        );
+
+        user = {
+          ...user,
+          paid: true,
+          stripe_subscription_id: sub.id,
+          subscription_end: periodEnd,
+        };
+      }
+    }
+
+    res.json({ user: { email: user.email, paid: user.paid || false } });
   } catch (err) {
     console.error('OAuth Error:', err.message);
     res.status(500).json({ error: 'Failed to verify Google token' });
   }
 });
+
 
 
 // ======== YouTube Helper ========
