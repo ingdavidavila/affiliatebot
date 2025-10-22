@@ -362,7 +362,7 @@ localStorage.setItem("authToken", response.data.token);
               </p>
               <div>
                 <button
-                  className="btn btn-success me-2"
+                  className="btn btn-outline-success"
                   onClick={() => handleSubscribe("monthly")}
                 >
                   $14.99 / month
