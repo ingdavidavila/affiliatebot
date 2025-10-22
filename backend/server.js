@@ -17,6 +17,17 @@ const JWT_EXPIRES_IN = '7d';
 
 const app = express();
 
+// ===== Force HTTPS in production =====
+if (process.env.NODE_ENV === 'production') {
+  app.use((req, res, next) => {
+    if (req.headers['x-forwarded-proto'] !== 'https') {
+      return res.redirect(`https://${req.headers.host}${req.url}`);
+    }
+    next();
+  });
+}
+
+
 // ======== CORS ========
 const allowedOrigins = [
   'https://www.affiliatesbot.com',
