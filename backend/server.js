@@ -203,6 +203,7 @@ app.post('/api/check-links', async (req, res) => {
     try {
       const parsed = JSON.parse(output.trim());
       const totalVideos = await totalVideosPromise;
+      console.log('🔍 Broken Links Returned:', parsed.brokenLinks)//termp line
       jobs[jobId] = {
         status: 'completed',
         result: { brokenLinks: parsed.brokenLinks || [], totalVideos },
