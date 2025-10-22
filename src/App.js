@@ -149,6 +149,12 @@ localStorage.setItem("authToken", response.data.token);
       const total = res.data.result.totalVideos || 0;
       setResults(brokenLinks);
       setTotalVideos(total);
+      if (brokenLinks.length === 0) {
+    toast.success("✅ No broken links found!");
+    setShowChannelPrompt(false);
+    setLoading(false);
+    return;
+    }
       if (paid) {
   toast.success(`✅ Completed — checked all your videos.`);
 } else {
