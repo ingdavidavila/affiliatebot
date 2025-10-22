@@ -185,6 +185,73 @@ app.get('/api/me', async (req, res) => {
   res.json(user);
 });
 
+// ======== Check Stripe Subscription by Email ========
+app.get('/api/stripe/status', async (req, res) => {
+  const user = await verifySession(req);
+  if (!user) return res.status(401).json({ error: 'Unauthorized' });
+
+  try {
+    let customerId = user.stripe_customer_id;
+
+    // If no customer ID, try lookup by email
+    if (!customerId) {
+      const customers = await stripe.customers.list({ email: user.email, limit: 1 });
+      if (customers.data.length > 0) {
+        customerId = customers.data[0].id;
+        await pool.query(
+          `UPDATE users SET stripe_customer_id = $1 WHERE id = $2`,
+          [customerId, user.id]
+        );
+      }
+    }
+
+    if (!customerId) {
+      return res.json({ paid: false, message: 'No Stripe customer found' });
+    }
+
+    // Check for active subscription
+    const subs = await stripe.subscriptions.list({
+      customer: customerId,
+      status: 'active',
+      limit: 1,
+    });
+
+    if (subs.data.length > 0) {
+      const sub = subs.data[0];
+      const periodEnd = new Date(sub.current_period_end * 1000).toISOString();
+
+      await pool.query(
+        `UPDATE users
+         SET paid = TRUE,
+             stripe_subscription_id = $1,
+             subscription_end = $2
+         WHERE id = $3`,
+        [sub.id, periodEnd, user.id]
+      );
+
+      return res.json({
+        paid: true,
+        stripe_subscription_id: sub.id,
+        subscription_end: periodEnd,
+      });
+    }
+
+    // No active subs found
+    await pool.query(
+      `UPDATE users SET paid = FALSE WHERE id = $1`,
+      [user.id]
+    );
+
+    res.json({ paid: false });
+  } catch (err) {
+    console.error('Stripe check error:', err);
+    res.status(500).json({ error: 'Failed to check Stripe status' });
+  }
+});
+
+
+
+
 // ======== Create Checkout Session ========
 app.post('/api/create-checkout-session', async (req, res) => {
   const user = await verifySession(req);

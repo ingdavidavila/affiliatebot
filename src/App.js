@@ -77,20 +77,30 @@ useEffect(() => {
   const handleLoginSuccess = async (cred) => {
     setLoading(true);
     try {
-      const response = await authGoogle(cred.credential);
-      const userData = response.data.user || response.data;
-      setUser(userData);
-      localStorage.setItem("authToken", cred.credential);
-      const status = await getCurrentUser(cred.credential);
-      setPaid(status.data.paid);
-      setShowChannelPrompt(true);
-      toast.success("Logged in successfully!");
-    } catch (err) {
-      console.error(err);
-      toast.error("Login failed.");
-    } finally {
-      setLoading(false);
-    }
+  const response = await authGoogle(cred.credential);
+  const userData = response.data.user || response.data;
+  setUser(userData);
+  localStorage.setItem("authToken", cred.credential);
+
+  // Immediately check Stripe status after login
+  const stripeCheck = await axios.get(`${process.env.REACT_APP_API_URL}/api/stripe/status`, {
+    headers: { Authorization: `Bearer ${cred.credential}` },
+  });
+
+  if (stripeCheck.data.paid) {
+    setPaid(true);
+    toast.success("Subscription active — full access unlocked!");
+  } else {
+    setPaid(false);
+  }
+
+  setShowChannelPrompt(true);
+} catch (err) {
+  console.error(err);
+  toast.error("Login failed.");
+} finally {
+  setLoading(false);
+}
   };
 
   const handleLogout = () => {
