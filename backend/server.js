@@ -330,41 +330,54 @@ app.post('/api/webhook', async (req, res) => {
   }
 
   try {
-    if (event.type === 'checkout.session.completed') {
+   if (event.type === 'checkout.session.completed') {
   const session = event.data.object;
   const email = session.customer_details?.email;
+  const customerId = session.customer;
 
-  if (session.subscription && email) {
+  if (email && customerId) {
     try {
-      // Retrieve subscription details
-      const subscription = await stripe.subscriptions.retrieve(session.subscription);
+      // Retrieve the customer's subscriptions
+      const subs = await stripe.subscriptions.list({
+        customer: customerId,
+        status: 'all', // include active, trialing, canceled, etc.
+        limit: 1,
+      });
 
-      // Safely handle period end
-      let periodEnd = null;
-      if (subscription.current_period_end) {
-        try {
-          periodEnd = new Date(subscription.current_period_end * 1000).toISOString();
-        } catch (e) {
-          console.warn('⚠️ Could not parse current_period_end:', e.message);
+      if (subs.data.length > 0) {
+        const sub = subs.data[0];
+        const isActive =
+          sub.status === 'active' || sub.status === 'trialing';
+
+        let periodEnd = null;
+        if (sub.current_period_end) {
+          try {
+            periodEnd = new Date(sub.current_period_end * 1000).toISOString();
+          } catch (e) {
+            console.warn('⚠️ Could not parse period end:', e.message);
+          }
         }
+
+        await pool.query(
+          `UPDATE users
+           SET paid = $1,
+               stripe_customer_id = $2,
+               stripe_subscription_id = $3,
+               subscription_end = $4
+           WHERE email = $5`,
+          [isActive, customerId, sub.id, periodEnd, email]
+        );
+
+        console.log(
+          `✅ Updated ${email} — status: ${sub.status}, sub: ${sub.id}`
+        );
+      } else {
+        console.warn(`⚠️ No subscriptions found for ${email}`);
       }
-
-      await pool.query(
-        `UPDATE users
-         SET paid = TRUE,
-             stripe_subscription_id = $1,
-             subscription_end = $2
-         WHERE email = $3`,
-        [subscription.id, periodEnd, email]
-      );
-
-      console.log(`✅ Marked ${email} as paid (subscription ${subscription.id})`);
     } catch (err) {
       console.error('Stripe check error:', err);
     }
   }
-
-
     }
 
     if (event.type === 'customer.subscription.deleted') {
