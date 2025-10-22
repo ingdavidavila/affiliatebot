@@ -228,8 +228,7 @@ localStorage.setItem("authToken", response.data.token);
 
   // ===== Paywall condition =====
   const shouldShowPaywall =
-   !paid && ((results.length > 0) || (results.length === 0 && totalVideos > 50));
-
+   !paid && ((results.length > 0) /*|| (results.length === 0 && totalVideos > 50)*/);
 
   return (
     <div className="app-wrapper">
@@ -279,7 +278,7 @@ localStorage.setItem("authToken", response.data.token);
 <input
   type="text"
   className="form-control mb-2"
-  placeholder="Paste your Channel ID (e.g. UC1234567890ABCDE)"
+  placeholder="(e.g. UC1234567890ABCDE)"
   value={channelInput}
   onChange={(e) => setChannelInput(e.target.value)}
 />
