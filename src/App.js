@@ -83,7 +83,7 @@ useEffect(() => {
   localStorage.setItem("authToken", cred.credential);
 
   // Immediately check Stripe status after login
-  const stripeCheck = await axios.get(`${process.env.REACT_APP_API_URL}/api/stripe/status`, {
+  const stripeCheck = await axios.get(`${process.env.FRONTEND_URL}/api/stripe/status`, {
     headers: { Authorization: `Bearer ${cred.credential}` },
   });
 
