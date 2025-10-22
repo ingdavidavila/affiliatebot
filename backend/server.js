@@ -191,71 +191,26 @@ app.get('/api/stripe/status', async (req, res) => {
   if (!user) return res.status(401).json({ error: 'Unauthorized' });
 
   try {
-    let customerId = user.stripe_customer_id;
+    if (!user.stripe_customer_id) return res.json({ paid: false });
 
-    // If no customer ID, try lookup by email
-    if (!customerId) {
-      const customers = await stripe.customers.list({ email: user.email, limit: 1 });
-      if (customers.data.length > 0) {
-        customerId = customers.data[0].id;
-        await pool.query(
-          `UPDATE users SET stripe_customer_id = $1 WHERE id = $2`,
-          [customerId, user.id]
-        );
-      }
-    }
-
-    if (!customerId) {
-      return res.json({ paid: false, message: 'No Stripe customer found' });
-    }
-
-    // Check for active subscription
     const subs = await stripe.subscriptions.list({
-      customer: customerId,
+      customer: user.stripe_customer_id,
       status: 'active',
       limit: 1,
     });
 
-    if (subs.data.length > 0) {
-      const sub = subs.data[0];
-      let periodEnd = null;
-if (subscription && subscription.current_period_end) {
-  try {
-    periodEnd = new Date(subscription.current_period_end * 1000).toISOString();
-  } catch (e) {
-    console.warn('⚠️ Could not parse current_period_end:', e.message);
-  }
-}
-
-await pool.query(
-  `UPDATE users
-   SET paid = TRUE,
-       stripe_subscription_id = $1,
-       subscription_end = $2
-   WHERE email = $3`,
-  [subscription.id, periodEnd, email]
-);
-console.log(`✅ Marked ${email} as paid (subscription ${subscription.id})`);
-
-      return res.json({
-        paid: true,
-        stripe_subscription_id: sub.id,
-        subscription_end: periodEnd,
-      });
+    const isPaid = subs.data.length > 0;
+    if (isPaid && !user.paid) {
+      await pool.query('UPDATE users SET paid = TRUE WHERE id = $1', [user.id]);
     }
 
-    // No active subs found
-    await pool.query(
-      `UPDATE users SET paid = FALSE WHERE id = $1`,
-      [user.id]
-    );
-
-    res.json({ paid: false });
+    res.json({ paid: isPaid });
   } catch (err) {
-    console.error('Stripe check error:', err);
-    res.status(500).json({ error: 'Failed to check Stripe status' });
+    console.error('Stripe status check error:', err.message);
+    res.status(500).json({ error: 'Stripe status check failed' });
   }
 });
+
 
 
 
