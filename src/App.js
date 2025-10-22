@@ -3,6 +3,7 @@ import { GoogleLogin } from "@react-oauth/google";
 import { ToastContainer, toast } from "react-toastify";
 import "react-toastify/dist/ReactToastify.css";
 import "./App.css";
+import axios from "axios";
 import {
   authGoogle,
   getCurrentUser,
@@ -103,26 +104,62 @@ useEffect(() => {
 
   // ===== Handle Channel Check =====
   const handleChannelSubmit = async () => {
-    if (!channelInput.trim()) {
-      toast.error("Please enter a Channel ID.");
-      return;
-    }
-    setLoading(true);
-    try {
-      const token = localStorage.getItem("authToken");
-      const res = await checkLinks(channelInput, paid ? -1 : 50, token);
-      const brokenLinks = res.data.result?.brokenLinks || [];
-      const total = res.data.result?.totalVideos || 0;
-      setResults(brokenLinks);
-      setTotalVideos(total);
-      toast.success(`Checked ${paid ? "all" : "first 50"} videos!`);
-    } catch (err) {
-      console.error(err);
-      toast.error("Failed to check links.");
-    } finally {
-      setLoading(false);
-    }
-  };
+  if (!channelInput.trim()) {
+    toast.error("Please enter a Channel ID.");
+    return;
+  }
+
+  setLoading(true);
+  setResults([]); // clear old results
+  setError("");
+  const token = localStorage.getItem("authToken");
+
+  try {
+    // Step 1: Start the background job
+    const startRes = await checkLinks(channelInput, paid ? -1 : 50, token);
+    const jobId = startRes.data.jobId;
+    toast.info("Checking links... this may take up to a minute.");
+
+    // Step 2: Poll every 4 seconds for job completion
+    const pollInterval = 4000;
+    const timeout = 180000; // 3 minutes
+    const startTime = Date.now();
+
+    const poll = setInterval(async () => {
+      try {
+        const res = await getJobStatus(jobId);
+        if (res.data.status === "completed") {
+          clearInterval(poll);
+          const brokenLinks = res.data.result.brokenLinks || [];
+          const total = res.data.result.totalVideos || 0;
+          setResults(brokenLinks);
+          setTotalVideos(total);
+          toast.success(
+            `Completed — checked ${paid ? "all" : "first 50"} videos.`
+          );
+          setLoading(false);
+        } else if (res.data.status === "error") {
+          clearInterval(poll);
+          toast.error("Something went wrong while checking links.");
+          setLoading(false);
+        } else if (Date.now() - startTime > timeout) {
+          clearInterval(poll);
+          toast.error("Timed out waiting for link check to complete.");
+          setLoading(false);
+        }
+      } catch (err) {
+        clearInterval(poll);
+        toast.error("Polling failed — please try again.");
+        setLoading(false);
+      }
+    }, pollInterval);
+  } catch (err) {
+    console.error("Error starting link check:", err);
+    toast.error("Unable to start the link check.");
+    setLoading(false);
+  }
+};
+
 
   // ===== Stripe Payment Redirect =====
   const handleSubscribe = async (plan) => {
