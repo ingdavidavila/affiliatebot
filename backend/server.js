@@ -193,20 +193,28 @@ app.post('/api/create-checkout-session', async (req, res) => {
   const { plan } = req.body;
   const priceId = plan === 'yearly' ? YEARLY_PRICE_ID : MONTHLY_PRICE_ID;
 
+  // 🔐 Always require an existing Stripe customer (no guest checkout)
   let custId = user.stripe_customer_id;
   if (!custId) {
+    // Create one now, before checkout
     const customer = await stripe.customers.create({
       email: user.email,
       metadata: { userId: String(user.id) },
     });
     custId = customer.id;
-    await pool.query('UPDATE users SET stripe_customer_id = $1 WHERE id = $2', [custId, user.id]);
+
+    // Save it immediately so future payments link correctly
+    await pool.query(
+      'UPDATE users SET stripe_customer_id = $1 WHERE id = $2',
+      [custId, user.id]
+    );
+    console.log(`✅ Created Stripe customer for ${user.email}: ${custId}`);
   }
 
+  // 🧾 Create checkout session strictly bound to that customer
   const session = await stripe.checkout.sessions.create({
     mode: 'subscription',
-    customer: custId,
-    customer_email: user.email,
+    customer: custId, // only customer, no customer_email allowed
     line_items: [{ price: priceId, quantity: 1 }],
     success_url: `${FRONTEND_URL}/?session_id={CHECKOUT_SESSION_ID}`,
     cancel_url: `${FRONTEND_URL}/payment-cancelled`,
