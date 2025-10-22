@@ -129,45 +129,48 @@ async function getTotalVideoCount(channelId) {
 const jobs = {};
 app.post('/api/check-links', async (req, res) => {
   const { channelId, maxVideos } = req.body;
+  if (!channelId) return res.status(400).json({ error: 'Missing channelId' });
 
-  if (!channelId) {
-    return res.status(400).json({ error: 'Missing channelId' });
-  }
+  const jobId = uuidv4();
+  jobs[jobId] = { status: 'running', result: null };
+  console.log(`Spawning Python with channelId: ${channelId}, maxVideos: ${maxVideos}, jobId: ${jobId}`);
 
-  console.log(`Spawning Python with channelId: ${channelId}, maxVideos: ${maxVideos}`);
   const python = spawn('python3', ['check_links.py', channelId, maxVideos.toString()], {
     env: { ...process.env, YOUTUBE_API_KEY: process.env.YOUTUBE_API_KEY },
   });
 
-  let stdoutData = '';
-  let stderrData = '';
+  let output = '';
+  python.stdout.on('data', (d) => (output += d.toString()));
+  python.stderr.on('data', (d) => console.error(`[PYTHON ERROR]: ${d}`));
 
-  python.stdout.on('data', (data) => {
-    stdoutData += data.toString();
-  });
-
-  python.stderr.on('data', (data) => {
-    console.error(`[PYTHON STDERR]: ${data}`);
-    stderrData += data.toString();
-  });
+  const totalVideosPromise = getTotalVideoCount(channelId);
 
   python.on('close', async (code) => {
     console.log(`Python process exited with code ${code}`);
-    if (code !== 0) {
-      return res.status(500).json({ error: 'Python script failed', details: stderrData });
-    }
-
     try {
-      const parsed = JSON.parse(stdoutData.trim());
-      const brokenLinks = parsed.brokenLinks || [];
-      console.log(`✅ Found ${brokenLinks.length} broken links`);
-      res.json({ brokenLinks, success: true });
+      const parsed = JSON.parse(output.trim());
+      const totalVideos = await totalVideosPromise;
+      jobs[jobId] = {
+        status: 'completed',
+        result: { brokenLinks: parsed.brokenLinks || [], totalVideos },
+      };
+      console.log(`✅ Job ${jobId} completed with ${parsed.brokenLinks?.length || 0} broken links`);
     } catch (err) {
-      console.error('❌ Failed to parse Python output:', err);
-      res.status(500).json({ error: 'Invalid Python output', raw: stdoutData });
+      console.error('❌ Python output parse error:', err.message);
+      jobs[jobId] = { status: 'error', result: { error: 'Invalid output' } };
     }
   });
+
+  // Return immediately — frontend will poll for status
+  res.json({ jobId });
 });
+
+app.get('/api/check-links/status/:jobId', (req, res) => {
+  const job = jobs[req.params.jobId];
+  if (!job) return res.status(404).json({ error: 'Job not found' });
+  res.json(job);
+});
+
 
 app.get('/api/check-links/status/:jobId', (req, res) => {
   const job = jobs[req.params.jobId];
