@@ -31,6 +31,19 @@ export async function getCurrentUser(token) {
   return res;
 }
 
+/*
+refresh mechanism is a secure process that allows your app to issue new JWTs without forcing the user to re-authenticate with Google every time their old token expires.
+*/
+export const refreshSession = async (token) => {
+  const res = await axios.post(
+    `${process.env.REACT_APP_BACKEND_URL}/api/session/refresh`,
+    {},
+    { headers: { Authorization: `Bearer ${token}` } }
+  );
+  return res.data;
+};
+
+
 /**
  * Create Stripe Checkout Session for a given plan ('monthly' | 'yearly')
  */

@@ -11,6 +11,9 @@ const { google } = require('googleapis');
 const { OAuth2Client } = require('google-auth-library');
 const Stripe = require('stripe');
 const { v4: uuidv4 } = require('uuid');
+const jwt = require('jsonwebtoken');
+const JWT_SECRET = process.env.JWT_SECRET || 'dev-insecure-secret'; // set on Heroku
+const JWT_EXPIRES_IN = '7d';
 
 const app = express();
 
@@ -53,6 +56,11 @@ initializeDatabase().catch(err => console.error('DB init error', err));
 
 // ======== Google Auth ========
 async function verifySession(req) {
+  // 1) Prefer our own long-lived JWT
+  const jwtUser = await verifyAppJWT(req);
+  if (jwtUser) return jwtUser;
+
+  // 2) Fallback to short-lived Google ID token (kept for backward compatibility)
   const auth = req.headers.authorization || '';
   const [, token] = auth.split(' ');
   if (!token) return null;
@@ -78,6 +86,7 @@ async function verifySession(req) {
     return null;
   }
 }
+
 
 app.post('/api/auth/google', async (req, res) => {
   const { token } = req.body;
@@ -105,13 +114,51 @@ app.post('/api/auth/google', async (req, res) => {
     // Include paid status from the users table
     const paid = user.paid || false;
 
-    res.json({ user: { email: user.email, paid } });
+    // ✅ Sign a long-lived app session token
+    const appToken = signAppToken(user);
+
+    // ✅ Return both user info and token
+    res.json({
+      user: { email: user.email, paid },
+      token: appToken
+    });
   } catch (err) {
     console.error('OAuth Error:', err.message);
     res.status(500).json({ error: 'Failed to verify Google token' });
   }
 });
 
+
+function signAppToken(userRow) {
+  // Keep the payload small; never include secrets
+  return jwt.sign(
+    {
+      uid: userRow.id,
+      email: userRow.email,
+      paid: !!userRow.paid,
+    },
+    JWT_SECRET,
+    { expiresIn: JWT_EXPIRES_IN }
+  );
+}
+
+async function verifyAppJWT(req) {
+  const auth = req.headers.authorization || '';
+  const [, token] = auth.split(' ');
+  if (!token) return null;
+
+  try {
+    const decoded = jwt.verify(token, JWT_SECRET);
+    // Always return fresh user state from DB
+    const { rows } = await pool.query(
+      'SELECT id, email, paid, stripe_customer_id FROM users WHERE id = $1',
+      [decoded.uid]
+    );
+    return rows[0] || null;
+  } catch {
+    return null;
+  }
+}
 
 // ======== YouTube Helper ========
 async function getTotalVideoCount(channelId) {
@@ -210,10 +257,6 @@ app.get('/api/stripe/status', async (req, res) => {
     res.status(500).json({ error: 'Stripe status check failed' });
   }
 });
-
-
-
-
 
 // ======== Create Checkout Session ========
 app.post('/api/create-checkout-session', async (req, res) => {
@@ -358,6 +401,17 @@ app.post('/api/webhook', async (req, res) => {
   res.json({ received: true });
 });
 
+// ======== Refresh JWT Session ========
+app.post('/api/session/refresh', async (req, res) => {
+  const user = await verifySession(req);
+  if (!user) return res.status(401).json({ error: 'Unauthorized' });
+
+  const freshToken = signAppToken(user);
+  res.json({
+    token: freshToken,
+    user: { email: user.email, paid: !!user.paid }
+  });
+});
 
 // ======== Serve Frontend ========
 app.use(express.static(path.join(__dirname, '../build')));

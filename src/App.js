@@ -11,6 +11,7 @@ import {
   verifyPayment,
   checkLinks,
   getJobStatus,
+  refreshSession,
 } from "./api";
 
 import AccountDropdown from "./AccountDropdown";
@@ -28,27 +29,28 @@ function App() {
 
   const itemsPerPage = 10;
 
-  // ===== On mount, check if returning from Stripe payment =====
-  // ===== On mount, check if returning from Stripe payment =====
+  /// ===== On mount, check if returning from Stripe payment =====
 useEffect(() => {
   const urlParams = new URLSearchParams(window.location.search);
   const sessionId = urlParams.get("session_id");
   const token = localStorage.getItem("authToken");
 
   (async () => {
-    // Rehydrate user if token exists
+    // ✅ Step 1: Try to refresh token first
     if (token) {
       try {
-        const res = await getCurrentUser(token);
-        setUser({ email: res.data.email });
-        setPaid(res.data.paid);
+        const refreshed = await refreshSession(token);
+        localStorage.setItem("authToken", refreshed.token);
+        setUser(refreshed.user);
+        setPaid(refreshed.user.paid);
         setShowChannelPrompt(true);
       } catch (err) {
-        console.error("Failed to fetch user:", err);
+        console.warn("Token expired or refresh failed:", err);
+        localStorage.removeItem("authToken");
       }
     }
 
-    // Handle Stripe return flow
+    // ✅ Step 2: Handle Stripe return flow
     if (sessionId && token) {
       try {
         const verifyRes = await verifyPayment(sessionId, token);
@@ -73,19 +75,22 @@ useEffect(() => {
 }, []);
 
 
+
   // ===== Handle Google Login =====
   const handleLoginSuccess = async (cred) => {
     setLoading(true);
     try {
   const response = await authGoogle(cred.credential);
-  const userData = response.data.user || response.data;
-  setUser(userData);
-  localStorage.setItem("authToken", cred.credential);
+const userData = response.data.user;
+setUser(userData);
 
-  // Immediately check Stripe status after login
-  const stripeCheck = await axios.get(`${process.env.REACT_APP_API_URL}/api/stripe/status`, {
-    headers: { Authorization: `Bearer ${cred.credential}` },
-  });
+// ✅ Store the new JWT instead of Google ID token
+localStorage.setItem("authToken", response.data.token);
+
+  const token = response.data.token;
+const stripeCheck = await axios.get(`${process.env.FRONTEND_URL}/api/stripe/status`, {
+  headers: { Authorization: `Bearer ${token}` },
+});
 
   if (stripeCheck.data.paid) {
     setPaid(true);
