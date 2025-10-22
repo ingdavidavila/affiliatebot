@@ -158,7 +158,7 @@ localStorage.setItem("authToken", response.data.token);
 
   // 👇 Force the paywall to show
   setPaid(false);
-  setResults(prev => prev.length ? prev : [{}]); // ensure something to trigger paywall
+  
   // 👇 Smooth scroll to the paywall section
   setTimeout(() => {
     const paywallSection = document.getElementById("paywall-section");
@@ -266,14 +266,16 @@ localStorage.setItem("authToken", response.data.token);
           {user && showChannelPrompt && (
             <div className="mt-4">
               <h5>Enter Your YouTube Channel ID</h5>
-<p className="text-muted small mb-2">
-  You can find your Channel ID by visiting{" "}
-  <a
+          <p className="text-muted small mb-2">
+            You can find your Channel ID by visiting{" "}
+            <a
     href="https://support.google.com/youtube/answer/3250431?hl=en"
     target="_blank"
     rel="noopener noreferrer"
-  />
-</p>
+  >
+    Find your Channel Id.
+  </a>{" "}
+          </p>
 
 <input
   type="text"
