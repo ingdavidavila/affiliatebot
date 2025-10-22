@@ -158,7 +158,7 @@ localStorage.setItem("authToken", response.data.token);
 
   // 👇 Force the paywall to show
   setPaid(false);
-
+  setResults(prev => prev.length ? prev : [{}]); // ensure something to trigger paywall
   // 👇 Smooth scroll to the paywall section
   setTimeout(() => {
     const paywallSection = document.getElementById("paywall-section");
@@ -228,7 +228,7 @@ localStorage.setItem("authToken", response.data.token);
 
   // ===== Paywall condition =====
   const shouldShowPaywall =
-   !paid && ((results.length > 0) /*|| (results.length === 0 && totalVideos > 50)*/);
+   !paid && ((results.length > 0) || (results.length === 0 && totalVideos > 50));
 
   return (
     <div className="app-wrapper">
