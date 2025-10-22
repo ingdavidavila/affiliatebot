@@ -129,25 +129,44 @@ async function getTotalVideoCount(channelId) {
 const jobs = {};
 app.post('/api/check-links', async (req, res) => {
   const { channelId, maxVideos } = req.body;
-  const jobId = uuidv4();
-  jobs[jobId] = { status: 'running', result: null };
 
-  const python = spawn('python3', ['check_links.py', channelId, maxVideos]);
-  let output = '';
-  python.stdout.on('data', d => output += d.toString());
-  const totalVideosPromise = getTotalVideoCount(channelId);
+  if (!channelId) {
+    return res.status(400).json({ error: 'Missing channelId' });
+  }
 
-  python.on('close', async () => {
-    try {
-      const parsed = JSON.parse(output);
-      const totalVideos = await totalVideosPromise;
-      jobs[jobId] = { status: 'completed', result: { brokenLinks: parsed, totalVideos } };
-    } catch {
-      jobs[jobId] = { status: 'error', result: { error: 'Invalid output' } };
-    }
+  console.log(`Spawning Python with channelId: ${channelId}, maxVideos: ${maxVideos}`);
+  const python = spawn('python3', ['check_links.py', channelId, maxVideos.toString()], {
+    env: { ...process.env, YOUTUBE_API_KEY: process.env.YOUTUBE_API_KEY },
   });
 
-  res.json({ jobId });
+  let stdoutData = '';
+  let stderrData = '';
+
+  python.stdout.on('data', (data) => {
+    stdoutData += data.toString();
+  });
+
+  python.stderr.on('data', (data) => {
+    console.error(`[PYTHON STDERR]: ${data}`);
+    stderrData += data.toString();
+  });
+
+  python.on('close', async (code) => {
+    console.log(`Python process exited with code ${code}`);
+    if (code !== 0) {
+      return res.status(500).json({ error: 'Python script failed', details: stderrData });
+    }
+
+    try {
+      const parsed = JSON.parse(stdoutData.trim());
+      const brokenLinks = parsed.brokenLinks || [];
+      console.log(`✅ Found ${brokenLinks.length} broken links`);
+      res.json({ brokenLinks, success: true });
+    } catch (err) {
+      console.error('❌ Failed to parse Python output:', err);
+      res.status(500).json({ error: 'Invalid Python output', raw: stdoutData });
+    }
+  });
 });
 
 app.get('/api/check-links/status/:jobId', (req, res) => {
