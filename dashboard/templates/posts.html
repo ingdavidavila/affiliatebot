@@ -1,0 +1,39 @@
+{% extends "base.html" %}
+{% block title %}Posts{% endblock %}
+{% block body %}
+<header class="head">
+  <h1>Posts</h1>
+  <div class="row">
+    <div class="seg" role="group" aria-label="Sort">
+      <a href="?days={{ days }}&order=recent" class="{{ 'on' if order != 'top' }}">Newest</a>
+      <a href="?days={{ days }}&order=top" class="{{ 'on' if order == 'top' }}">Top earning</a>
+    </div>
+    {% include "_period.html" %}
+  </div>
+</header>
+<section class="card flush">
+{% if posts %}
+<table>
+  <thead><tr><th>Posted</th><th>Deal</th><th>Source</th><th class="num">Off</th><th class="num">Cost</th><th class="num">Sales</th><th class="num">Earned</th><th>Status</th></tr></thead>
+  <tbody>
+  {% for p in posts %}
+    <tr>
+      <td class="nowrap">{{ fmt_time(p.posted_at) }}</td>
+      <td class="clip wide"><details><summary title="{{ p.title }}">{{ p.title }}</summary><pre class="post">{{ p.text }}</pre><p class="small muted">Tracking id: <code>{{ p.tracking_id }}</code></p></details></td>
+      <td>{{ p.source }}</td>
+      <td class="num">{{ '%.0f'|format(p.discount_pct or 0) }}%</td>
+      <td class="num">{{ fmt_money(p.cost_usd) }}</td>
+      <td class="num">{{ p.sales }}</td>
+      <td class="num">{{ fmt_money(p.commission) }}</td>
+      <td class="nowrap">
+        {% if p.error %}<span class="pill bad" title="{{ p.error }}">Failed</span>
+        {% elif p.dry_run %}<span class="pill warn">Dry run</span>
+        {% else %}<a href="https://x.com/i/web/status/{{ p.tweet_id }}" target="_blank" rel="noopener">View on X</a>{% endif %}
+      </td>
+    </tr>
+  {% endfor %}
+  </tbody>
+</table>
+{% else %}<p class="muted pad">No posts in this period.</p>{% endif %}
+</section>
+{% endblock %}

@@ -1,0 +1,51 @@
+{% extends "base.html" %}
+{% block title %}Queue{% endblock %}
+{% macro deal_row(d, actions) %}
+<tr>
+  <td class="clip wide"><a href="{{ d.url }}" target="_blank" rel="noopener" title="{{ d.title }}">{{ d.title }}</a>
+    <div class="small muted">{{ d.source }}{% if d.category %} · {{ d.category }}{% endif %} · found {{ fmt_time(d.found_at) }}</div></td>
+  <td class="num">{{ fmt_money(d.price) }}</td>
+  <td class="num muted"><s>{{ fmt_money(d.original_price) }}</s></td>
+  <td class="num"><strong>{{ '%.0f'|format(d.discount_pct or 0) }}%</strong></td>
+  <td class="actions">
+    {% for action, label, cls in actions %}
+    <form method="post" action="{{ url_for('queue_action') }}">
+      <input type="hidden" name="csrf" value="{{ csrf }}"><input type="hidden" name="id" value="{{ d.id }}">
+      <button class="btn small {{ cls }}" name="action" value="{{ action }}">{{ label }}</button>
+    </form>
+    {% endfor %}
+  </td>
+</tr>
+{% endmacro %}
+{% block body %}
+<header class="head">
+  <h1>Queue</h1>
+  {% if queued %}
+  <form method="post" action="{{ url_for('queue_action') }}" class="row">
+    <input type="hidden" name="csrf" value="{{ csrf }}">
+    <button class="btn" name="action" value="skip_all">Skip all</button>
+    <button class="btn primary" name="action" value="approve_all">Approve all {{ queued|length }}</button>
+  </form>
+  {% endif %}
+</header>
+
+<section class="card flush">
+  <h2 class="pad">Waiting for your approval</h2>
+  {% if queued %}
+  <table>
+    <thead><tr><th>Deal</th><th class="num">Price</th><th class="num">Was</th><th class="num">Off</th><th></th></tr></thead>
+    <tbody>{% for d in queued %}{{ deal_row(d, [('skip', 'Skip', ''), ('approve', 'Approve', ''), ('post_now', 'Post now', 'primary')]) }}{% endfor %}</tbody>
+  </table>
+  {% else %}<p class="muted pad">Nothing waiting. New deals show up here after each run{% if not demo %} when “Approve deals before posting” is on{% endif %}.</p>{% endif %}
+</section>
+
+<section class="card flush">
+  <h2 class="pad">Approved, posting next</h2>
+  {% if approved %}
+  <table>
+    <thead><tr><th>Deal</th><th class="num">Price</th><th class="num">Was</th><th class="num">Off</th><th></th></tr></thead>
+    <tbody>{% for d in approved %}{{ deal_row(d, [('unapprove', 'Move back', ''), ('post_now', 'Post now', 'primary')]) }}{% endfor %}</tbody>
+  </table>
+  {% else %}<p class="muted pad">No approved deals. The bot posts from this list, biggest discount first.</p>{% endif %}
+</section>
+{% endblock %}

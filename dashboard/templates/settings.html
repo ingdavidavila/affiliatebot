@@ -1,0 +1,42 @@
+{% extends "base.html" %}
+{% block title %}Settings{% endblock %}
+{% block body %}
+<header class="head"><h1>Settings</h1></header>
+
+<div class="grid2">
+  <section class="card">
+    <h2>Posting rules</h2>
+    <form method="post" action="{{ url_for('settings_save') }}" class="stack">
+      <input type="hidden" name="csrf" value="{{ csrf }}">
+      {% for key, label, kind, help in fields %}
+        {% if kind == 'bool' %}
+          <label class="check"><input type="checkbox" name="{{ key }}" {{ 'checked' if s[key] }}> {{ label }}</label>
+        {% else %}
+          <label>{{ label }}
+            <input name="{{ key }}" value="{{ s[key] }}" {% if kind == 'number' %}inputmode="decimal"{% endif %}>
+          </label>
+        {% endif %}
+        {% if help %}<p class="help">{{ help }}</p>{% endif %}
+      {% endfor %}
+      <button class="btn primary">Save settings</button>
+    </form>
+  </section>
+
+  <div>
+    <section class="card">
+      <h2>API keys</h2>
+      <p class="muted small">Keys live in the <code>.env</code> file in the project folder, never in the database. This only shows whether each one is set.</p>
+      {% for group, items in keys.items() %}
+        <h3>{{ group }}</h3>
+        <ul class="keys">{% for k, ok in items %}<li><span class="pill {{ 'good' if ok else 'muted-pill' }}">{{ 'Set' if ok else 'Missing' }}</span> <code>{{ k }}</code></li>{% endfor %}</ul>
+      {% endfor %}
+    </section>
+    <section class="card">
+      <h2>Deal sources</h2>
+      <p class="muted small">Turn sources on or off in <code>config.yaml</code>.</p>
+      <ul class="keys">{% for name, on in sources %}<li><span class="pill {{ 'good' if on else 'muted-pill' }}">{{ 'On' if on else 'Off' }}</span> {{ name }}</li>{% endfor %}</ul>
+      <p class="muted small">Mode: <strong>{{ 'Dry run' if dry_run else 'Live' }}</strong> (set <code>dry_run</code> in config.yaml).<br>Database: <code>{{ db_path }}</code></p>
+    </section>
+  </div>
+</div>
+{% endblock %}

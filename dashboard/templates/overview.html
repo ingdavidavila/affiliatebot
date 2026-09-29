@@ -1,0 +1,64 @@
+{% extends "base.html" %}
+{% block title %}Overview{% endblock %}
+{% block body %}
+<header class="head">
+  <h1>Overview</h1>
+  {% set order = None %}{% include "_period.html" %}
+</header>
+
+<section class="tiles">
+  <div class="tile">
+    <div class="label">Earnings</div>
+    <div class="value">{{ fmt_money(s.commission) }}</div>
+    <div class="sub">{{ s.sales }} sale{{ '' if s.sales == 1 else 's' }}{% if s.unattributed %} · {{ fmt_money(s.unattributed) }} not tied to a post{% endif %}</div>
+  </div>
+  <div class="tile">
+    <div class="label">Spend</div>
+    <div class="value">{{ fmt_money(s.spend + s.other_expenses) }}</div>
+    <div class="sub">X {{ fmt_money(s.spend) }}{% if s.other_expenses %} · other {{ fmt_money(s.other_expenses) }}{% endif %}</div>
+  </div>
+  <div class="tile">
+    <div class="label">Net profit</div>
+    <div class="value {{ 'pos' if s.net > 0 else ('neg' if s.net < 0 else '') }}">{{ fmt_money(s.net) }}</div>
+    <div class="sub">{% if s.roi is not none %}{{ '%+.0f'|format(s.roi * 100) }}% return on spend{% else %}No spend yet{% endif %}</div>
+  </div>
+  <div class="tile">
+    <div class="label">Posts</div>
+    <div class="value">{{ s.posts }}</div>
+    <div class="sub">{{ s.posts_with_sales }} led to a sale{% if s.posts %} ({{ '%.0f'|format(100 * s.posts_with_sales / s.posts) }}%){% endif %}</div>
+  </div>
+</section>
+
+<section class="card">
+  <h2>Earnings vs spend per day</h2>
+  {{ chart|safe }}
+  <details class="table-view">
+    <summary>Show as table</summary>
+    <table>
+      <thead><tr><th>Date</th><th class="num">Posts</th><th class="num">Earnings</th><th class="num">Spend</th><th class="num">Net</th></tr></thead>
+      <tbody>{% for r in rows|reverse %}<tr><td>{{ r.date }}</td><td class="num">{{ r.posts }}</td><td class="num">{{ fmt_money(r.commission) }}</td><td class="num">{{ fmt_money(r.spend) }}</td><td class="num">{{ fmt_money(r.net) }}</td></tr>{% endfor %}</tbody>
+    </table>
+  </details>
+</section>
+
+<div class="grid2">
+  <section class="card">
+    <h2>What sells, by category</h2>
+    {% if cats %}
+    <table>
+      <thead><tr><th>Category</th><th class="num">Posts</th><th class="num">Sales</th><th class="num">Earned</th><th class="num">Net</th></tr></thead>
+      <tbody>{% for c in cats %}<tr><td>{{ c.category }}</td><td class="num">{{ c.posts }}</td><td class="num">{{ c.sales }}</td><td class="num">{{ fmt_money(c.commission) }}</td><td class="num {{ 'neg' if c.net < 0 }}">{{ fmt_money(c.net) }}</td></tr>{% endfor %}</tbody>
+    </table>
+    {% else %}<p class="muted">No posts in this period yet.</p>{% endif %}
+  </section>
+  <section class="card">
+    <h2>Top earning posts</h2>
+    {% if top %}
+    <table>
+      <thead><tr><th>Deal</th><th class="num">Sales</th><th class="num">Earned</th></tr></thead>
+      <tbody>{% for p in top %}<tr><td class="clip" title="{{ p.title }}">{{ p.title }}</td><td class="num">{{ p.sales }}</td><td class="num">{{ fmt_money(p.commission) }}</td></tr>{% endfor %}</tbody>
+    </table>
+    {% else %}<p class="muted">No sales matched to posts yet. Import your network's report on the Earnings page.</p>{% endif %}
+  </section>
+</div>
+{% endblock %}

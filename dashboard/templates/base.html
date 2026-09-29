@@ -1,0 +1,49 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>{% block title %}Dashboard{% endblock %} · Deal Bot</title>
+<link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+</head>
+<body>
+<div class="app">
+  <aside class="side">
+    <div class="brand">Deal Bot</div>
+    <nav>
+      <a href="{{ url_for('overview') }}" class="{{ 'on' if nav == 'overview' }}">Overview</a>
+      <a href="{{ url_for('posts') }}" class="{{ 'on' if nav == 'posts' }}">Posts</a>
+      <a href="{{ url_for('queue') }}" class="{{ 'on' if nav == 'queue' }}">Queue{% if queued_count %}<span class="count">{{ queued_count }}</span>{% endif %}</a>
+      <a href="{{ url_for('earnings') }}" class="{{ 'on' if nav == 'earnings' }}">Earnings</a>
+      <a href="{{ url_for('settings_page') }}" class="{{ 'on' if nav == 'settings_page' }}">Settings</a>
+    </nav>
+    <div class="side-foot">
+      <div class="mode">
+        {% if demo %}<span class="pill warn">Demo data</span>
+        {% elif dry_run %}<span class="pill warn">Dry run</span>
+        {% else %}<span class="pill good">Live</span>{% endif %}
+        {% if paused %}<span class="pill bad">Paused</span>{% endif %}
+      </div>
+      <form method="post" action="{{ url_for('toggle_pause') }}">
+        <input type="hidden" name="csrf" value="{{ csrf }}">
+        <button class="btn block">{{ 'Resume bot' if paused else 'Pause bot' }}</button>
+      </form>
+      <form method="post" action="{{ url_for('run_now') }}">
+        <input type="hidden" name="csrf" value="{{ csrf }}">
+        <button class="btn block primary">Run now</button>
+      </form>
+      {% if last_run %}<p class="muted small">Last run: {{ fmt_time(last_run.started_at) }}</p>{% endif %}
+    </div>
+  </aside>
+  <main>
+    {% if demo %}<div class="banner">You're looking at made-up demo data. Real numbers appear when you run <code>python -m bot dashboard</code> without <code>--demo</code>.</div>
+    {% elif dry_run %}<div class="banner">Dry run: the bot finds deals and writes posts, but nothing is sent to X. Spend shown is what it <em>would</em> have cost. Set <code>dry_run: false</code> in config.yaml to go live.</div>{% endif %}
+    {% with msgs = get_flashed_messages(with_categories=true) %}
+      {% for cat, m in msgs %}<div class="flash {{ cat }}">{{ m }}</div>{% endfor %}
+    {% endwith %}
+    {% block body %}{% endblock %}
+  </main>
+</div>
+<script src="{{ url_for('static', filename='app.js') }}"></script>
+</body>
+</html>

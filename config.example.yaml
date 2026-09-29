@@ -1,0 +1,53 @@
+# Copy this file to config.yaml and edit it. (config.yaml is ignored by git.)
+# API keys do NOT go here. They go in .env (see .env.example).
+
+# Where the bot and dashboard keep their data.
+database: data/affiliate.db
+
+# true  = find deals and write posts, but never send anything to X (safe for testing)
+# false = post for real (costs money on the X API)
+dry_run: true
+
+sources:
+  # Fake deals so you can test everything with no API keys. Turn off once a real source works.
+  demo:
+    enabled: true
+
+  # eBay Browse API + eBay Partner Network links. Needs EBAY_APP_ID, EBAY_CERT_ID, EPN_CAMPAIGN_ID in .env.
+  ebay:
+    enabled: false
+    marketplace: EBAY_US
+    keywords: ["wireless headphones", "air fryer", "mechanical keyboard"]
+    category_ids: []        # optional eBay category ids, e.g. [175672] for laptops
+    limit: 50               # results per keyword
+
+  # Deals you paste into data/manual_deals.csv yourself (e.g. Amazon).
+  # Amazon links get AMAZON_ASSOCIATE_TAG from .env added automatically.
+  manual:
+    enabled: false
+    file: data/manual_deals.csv
+
+# Starting values for the posting rules. After the first run you can change
+# these from the dashboard's Settings page instead (the dashboard wins).
+settings:
+  paused: false
+  approval_mode: true          # new deals wait in the Queue until you approve them
+  min_discount_pct: 30
+  min_price: 10
+  max_price: 1000
+  max_posts_per_day: 8
+  posts_per_run: 1
+  min_minutes_between_posts: 60
+  daily_budget_usd: 3.00
+  blocked_keywords: "refurbished, for parts, replica"
+  hashtags: "#deal #sale"
+  disclosure: "#ad"            # FTC requires a clear disclosure on affiliate posts
+
+# X API pay-per-use prices as of Sept 2026. Update if X changes them.
+costs:
+  x_post_with_link_usd: 0.20
+  x_post_without_link_usd: 0.015
+
+dashboard:
+  host: 127.0.0.1   # only reachable from your own Mac
+  port: 8765

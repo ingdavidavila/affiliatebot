@@ -1,0 +1,18 @@
+# secrets and local config
+.env
+config.yaml
+
+# data (your database, logs, manual deals)
+data/*
+!data/.gitkeep
+!data/manual_deals.example.csv
+
+# python
+__pycache__/
+*.pyc
+.venv/
+venv/
+.pytest_cache/
+
+# macOS
+.DS_Store
