@@ -1,6 +1,7 @@
 """Command line entry point.
 
-    python -m bot run                 # find deals, then post (what the scheduler calls)
+    python -m bot run                 # find deals, post, sync earnings (what the scheduler calls)
+    python -m bot sync-earnings       # pull commissions from network APIs now
     python -m bot find                # only look for deals
     python -m bot post                # only post approved deals
     python -m bot loop --minutes 30   # run forever (for a server instead of launchd)
@@ -32,6 +33,20 @@ def _setup_logging(verbose: bool) -> None:
     )
 
 
+def cycle(cfg: dict) -> None:
+    """One fully automatic pass: find deals, post, and sync earnings when due.
+    Each step is independent, so one failing (e.g. a network outage) doesn't stop the others."""
+    from .earnings_sync import sync_earnings
+    from .finder import find_deals
+    from .poster import run_poster
+    log = logging.getLogger("bot")
+    for name, step in (("find", find_deals), ("post", run_poster), ("sync", sync_earnings)):
+        try:
+            step(cfg)
+        except Exception:
+            log.exception("Step '%s' failed; will retry next run", name)
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(prog="python -m bot", description="Affiliate deal bot")
     parser.add_argument("-v", "--verbose", action="store_true")
@@ -42,6 +57,7 @@ def main(argv: list[str] | None = None) -> int:
     sub.add_parser("post", help="post approved deals only")
     p_loop = sub.add_parser("loop", help="run forever")
     p_loop.add_argument("--minutes", type=int, default=30)
+    sub.add_parser("sync-earnings", help="pull commissions from network APIs now")
     p_imp = sub.add_parser("import-earnings", help="import a network earnings CSV")
     p_imp.add_argument("file")
     p_imp.add_argument("--network", required=True, help="e.g. ebay, amazon, impact")
@@ -61,29 +77,36 @@ def main(argv: list[str] | None = None) -> int:
         from .poster import run_poster
         if cfg["dry_run"]:
             log.info("DRY RUN mode: nothing will be posted to X (set dry_run: false in config.yaml)")
-        if args.cmd in ("run", "find"):
+        if args.cmd == "run":
+            cycle(cfg)
+        elif args.cmd == "find":
             find_deals(cfg)
-        if args.cmd in ("run", "post"):
+        else:
             run_poster(cfg)
         return 0
 
     if args.cmd == "loop":
-        from .finder import find_deals
-        from .poster import run_poster
         while True:
-            try:
-                find_deals(cfg)
-                run_poster(cfg)
-            except Exception:
-                log.exception("Cycle failed; will retry next time")
+            cycle(cfg)
             time.sleep(args.minutes * 60)
+
+    if args.cmd == "sync-earnings":
+        from .earnings_sync import sync_earnings
+        result = sync_earnings(cfg, force=True)
+        if not cfg.get("earnings_sync", {}).get("networks"):
+            print("No networks set up. Add them under earnings_sync.networks in config.yaml.")
+        for name, st in result["networks"].items():
+            print(f"{name}: {st['imported']} new, {st.get('updated', 0)} updated, {st['matched']} matched to posts")
+        for err in result["errors"]:
+            print("Error:", err)
+        return 1 if result["errors"] else 0
 
     if args.cmd == "import-earnings":
         from .earnings import import_csv
         with db.session(cfg["database"]) as conn, open(args.file, encoding="utf-8-sig") as fh:
             stats = import_csv(conn, fh, args.network)
         print(f"Imported {stats['imported']} rows ({stats['matched']} matched to posts), "
-              f"{stats['duplicates']} already imported, {stats['skipped']} skipped.")
+              f"{stats['updated']} updated, {stats['duplicates']} unchanged, {stats['skipped']} skipped.")
         return 0
 
     if args.cmd == "status":

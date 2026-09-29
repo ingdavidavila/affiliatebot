@@ -6,7 +6,7 @@ import sqlite3
 from datetime import datetime, timedelta, timezone
 from typing import Any
 
-from . import db
+from . import autopilot, db
 from .composer import compose
 
 log = logging.getLogger(__name__)
@@ -50,18 +50,11 @@ def limits_status(conn: sqlite3.Connection, cfg: dict[str, Any], settings: dict[
     return True, "ok"
 
 
-def _next_deal(conn: sqlite3.Connection) -> sqlite3.Row | None:
-    return conn.execute(
-        "SELECT * FROM deals WHERE status = 'approved' "
-        "ORDER BY discount_pct DESC, found_at DESC LIMIT 1"
-    ).fetchone()
-
-
 def post_one(conn: sqlite3.Connection, cfg: dict[str, Any], settings: dict[str, Any],
              deal_id: int | None = None, client=None) -> dict[str, Any]:
-    """Post a single deal (the best approved one, or a specific one)."""
+    """Post a single deal (the best-scoring approved one, or a specific one)."""
     deal = (conn.execute("SELECT * FROM deals WHERE id = ?", (deal_id,)).fetchone()
-            if deal_id else _next_deal(conn))
+            if deal_id else autopilot.pick_best(conn, settings))
     if deal is None:
         return {"posted": False, "reason": "No approved deals waiting"}
 
@@ -98,8 +91,13 @@ def run_poster(cfg: dict[str, Any], client=None) -> dict[str, Any]:
     with db.session(cfg["database"]) as conn:
         settings = db.get_settings(conn, cfg["settings"])
         run_id = db.start_run(conn, "post")
+        autopilot.housekeeping(conn, settings)
         for _ in range(max(1, int(settings["posts_per_run"]))):
             ok, reason = limits_status(conn, cfg, settings)
+            cooldown = autopilot.failure_cooldown(conn, bool(cfg["dry_run"]),
+                                                  float(settings.get("failure_cooldown_hours", 6)))
+            if ok and cooldown:
+                ok, reason = False, cooldown
             if not ok:
                 reasons.append(reason)
                 break

@@ -5,6 +5,8 @@ import random
 import re
 from typing import Any, Mapping
 
+from .sources import shows_price
+
 X_LIMIT = 280
 X_URL_LENGTH = 23  # X counts every link as 23 characters
 
@@ -45,11 +47,20 @@ def compose(deal: Mapping[str, Any], settings: Mapping[str, Any], rng: random.Ra
     rng = rng or random.Random()
     opener = rng.choice(OPENERS)
     currency = deal.get("currency") or "USD"
-    price_line = money(deal["price"], currency)
-    if deal.get("original_price"):
-        price_line += f" (was {money(deal['original_price'], currency)})"
-    if deal.get("discount_pct"):
-        price_line += f" · {round(deal['discount_pct'])}% off"
+    if not shows_price(deal.get("source") or ""):
+        # e.g. Amazon via Keepa: say how big the drop is, without quoting a price
+        pct = round(deal.get("discount_pct") or 0)
+        price_line = rng.choice([
+            f"{pct}% below its 90-day average price",
+            f"Down {pct}% vs. its usual price",
+            f"Now {pct}% under its 3-month average",
+        ])
+    else:
+        price_line = money(deal["price"], currency)
+        if deal.get("original_price"):
+            price_line += f" (was {money(deal['original_price'], currency)})"
+        if deal.get("discount_pct"):
+            price_line += f" · {round(deal['discount_pct'])}% off"
 
     tags = " ".join(t for t in [settings.get("disclosure", "#ad"), settings.get("hashtags", "")] if t).strip()
     title = " ".join(str(deal["title"]).split())

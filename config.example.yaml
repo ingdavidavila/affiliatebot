@@ -21,17 +21,43 @@ sources:
     category_ids: []        # optional eBay category ids, e.g. [175672] for laptops
     limit: 50               # results per keyword
 
-  # Deals you paste into data/manual_deals.csv yourself (e.g. Amazon).
-  # Amazon links get AMAZON_ASSOCIATE_TAG from .env added automatically.
+  # Automatic Amazon deals from Keepa's price-history database (paid Keepa API plan).
+  # Needs KEEPA_API_KEY and AMAZON_ASSOCIATE_TAG in .env. Finds items whose price
+  # dropped vs. their 90-day average. Posts show the % drop, not the price (Amazon rules).
+  keepa:
+    enabled: false
+    domain: US                 # US, GB, DE, CA
+    price_type: amazon         # amazon = sold by Amazon, new = third-party new
+    compare_to: 90days         # day, week, month, 90days
+    min_drop_pct: 30
+    min_price: 15
+    max_price: 500
+    pages: 1                   # 150 deals per page; each page costs 5 Keepa tokens
+    include_categories: []     # Amazon category ids, e.g. [172282] for Electronics
+    exclude_categories: []
+
+  # Optional: deals you paste into data/manual_deals.csv yourself.
   manual:
     enabled: false
     file: data/manual_deals.csv
+
+# Pulls your commissions automatically so the dashboard stays current with no downloads.
+# Supported: ebay (needs EPN_ACCOUNT_SID and EPN_AUTH_TOKEN in .env).
+# Amazon has no earnings API; import its report on the Earnings page if you want it counted.
+earnings_sync:
+  networks: []                 # e.g. [ebay]
+  every_hours: 6
+  days_back: 45                # re-checks older sales whose status changed
 
 # Starting values for the posting rules. After the first run you can change
 # these from the dashboard's Settings page instead (the dashboard wins).
 settings:
   paused: false
-  approval_mode: true          # new deals wait in the Queue until you approve them
+  approval_mode: false         # false = autopilot (no human input); true = approve deals in the Queue
+  learn_from_sales: true       # favor categories that have earned you money
+  category_cooldown_posts: 3   # don't repeat a category from the last 3 posts
+  max_deal_age_hours: 24       # drop deals that weren't posted within a day
+  failure_cooldown_hours: 6    # after 3 failed posts in a row, wait, then retry by itself
   min_discount_pct: 30
   min_price: 10
   max_price: 1000

@@ -102,7 +102,7 @@ tr:last-child td { border-bottom: 0; }
 .card.flush th:first-child, .card.flush td:first-child { padding-left: 18px; }
 .card.flush th:last-child, .card.flush td:last-child { padding-right: 18px; }
 .num { text-align: right; font-variant-numeric: tabular-nums; white-space: nowrap; }
-td.neg { color: var(--bad); }
+td.neg, .neg-text { color: var(--bad); }
 .nowrap { white-space: nowrap; }
 .clip { max-width: 260px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .clip.wide { max-width: 420px; }

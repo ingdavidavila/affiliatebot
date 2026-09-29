@@ -36,7 +36,7 @@
     <thead><tr><th>Deal</th><th class="num">Price</th><th class="num">Was</th><th class="num">Off</th><th></th></tr></thead>
     <tbody>{% for d in queued %}{{ deal_row(d, [('skip', 'Skip', ''), ('approve', 'Approve', ''), ('post_now', 'Post now', 'primary')]) }}{% endfor %}</tbody>
   </table>
-  {% else %}<p class="muted pad">Nothing waiting. New deals show up here after each run{% if not demo %} when “Approve deals before posting” is on{% endif %}.</p>{% endif %}
+  {% else %}<p class="muted pad">{% if autopilot %}Autopilot is on, so new deals skip this step and go straight to the list below. Turn on “Approve deals by hand” in Settings if you want to review them first.{% else %}Nothing waiting. New deals show up here after each run.{% endif %}</p>{% endif %}
 </section>
 
 <section class="card flush">
@@ -46,6 +46,6 @@
     <thead><tr><th>Deal</th><th class="num">Price</th><th class="num">Was</th><th class="num">Off</th><th></th></tr></thead>
     <tbody>{% for d in approved %}{{ deal_row(d, [('unapprove', 'Move back', ''), ('post_now', 'Post now', 'primary')]) }}{% endfor %}</tbody>
   </table>
-  {% else %}<p class="muted pad">No approved deals. The bot posts from this list, biggest discount first.</p>{% endif %}
+  {% else %}<p class="muted pad">No approved deals. The bot posts from this list, best score first (discount, price, category rotation and past sales).</p>{% endif %}
 </section>
 {% endblock %}

@@ -24,6 +24,21 @@
 
   <div>
     <section class="card">
+      <h2>Automation status</h2>
+      <table class="small-table">
+        <tbody>
+        {% for label, r in activity %}
+          <tr>
+            <td>{{ label }}</td>
+            <td class="nowrap">{{ fmt_time(r.started_at) if r else 'Never' }}</td>
+            <td>{% if r and r.message %}<span class="small muted">{{ r.message }}</span>{% elif r %}<span class="pill good">OK</span>{% endif %}</td>
+          </tr>
+        {% endfor %}
+        </tbody>
+      </table>
+      {% if not sync_networks %}<p class="muted small">Earnings sync is off. See the Earnings page to turn it on.</p>{% endif %}
+    </section>
+    <section class="card">
       <h2>API keys</h2>
       <p class="muted small">Keys live in the <code>.env</code> file in the project folder, never in the database. This only shows whether each one is set.</p>
       {% for group, items in keys.items() %}

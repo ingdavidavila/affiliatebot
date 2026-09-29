@@ -65,7 +65,7 @@ def seed(path: str, days: int = 30, seed_value: int = 7) -> None:
             )
         conn.execute("INSERT INTO expenses(date, amount_usd, note) VALUES (?, 5.0, 'Server (example)')",
                      ((now - timedelta(days=12)).date().isoformat(),))
-        # a few deals waiting in the queue
+        # a few deals lined up to post next (autopilot approves them automatically)
         for i, (title, category, list_price) in enumerate(rng.sample(PRODUCTS, 5)):
             pct = rng.choice([30, 40, 50])
             conn.execute(
@@ -73,6 +73,8 @@ def seed(path: str, days: int = 30, seed_value: int = 7) -> None:
                 "discount_pct, category, tracking_id, status, found_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?)",
                 ("ebay", f"queue-{i}", title, f"https://example.com/q/{i}",
                  f"https://example.com/q/{i}?subid=x", round(list_price * (1 - pct / 100), 2), list_price,
-                 pct, category, new_tracking_id(), "queued", db.now_iso()),
+                 pct, category, new_tracking_id(), "approved", db.now_iso()),
             )
-        db.start_run(conn, "find")
+        for kind, fields in (("find", {"found": 8, "added": 3}), ("post", {"posted": 1})):
+            run_id = db.start_run(conn, kind)
+            db.finish_run(conn, run_id, **fields)

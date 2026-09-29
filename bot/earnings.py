@@ -22,22 +22,22 @@ from typing import IO, Any, Iterable
 from . import db
 
 FIELD_ALIASES: dict[str, list[str]] = {
-    "tracking_id": ["tracking_id", "tracking id", "custom id", "customid", "custom_id", "sub id",
-                    "subid", "sub_id", "subid1", "sub id 1", "shared id", "sharedid", "u1",
-                    "member id", "sid"],
+    # Headers are normalized first: lower case, underscores -> spaces ("Custom_ID" -> "custom id").
+    "tracking_id": ["tracking id", "custom id", "customid", "sub id", "subid", "subid1", "sub id 1",
+                    "shared id", "sharedid", "u1", "member id", "sid"],
     "commission": ["commission", "earnings", "total earnings", "payout", "ad fees", "ad fees($)",
                    "ad fees ($)", "publisher commission", "commission amount", "action earnings"],
-    "event_date": ["event_date", "event date", "date", "transaction date", "date shipped",
+    "event_date": ["event date", "eventdate", "date", "transaction date", "date shipped",
                    "action date", "sale date", "order date", "click date", "posting date"],
-    "sale_amount": ["sale_amount", "sale amount", "sales", "revenue", "order amount",
+    "sale_amount": ["sale amount", "sales", "revenue", "order amount",
                     "item price", "price", "price($)", "price ($)", "sale value", "gmv"],
-    "order_ref": ["order_ref", "order id", "order_id", "transaction id", "checkout transaction id",
-                  "action id", "event id", "item id", "asin", "id"],
+    "order_ref": ["order ref", "epntransactionid", "epn transaction id", "order id", "transaction id",
+                  "checkout transaction id", "action id", "event id", "item id", "asin", "id"],
 }
 
 
 def _norm(h: str) -> str:
-    return re.sub(r"\s+", " ", (h or "").strip().lower())
+    return re.sub(r"\s+", " ", (h or "").replace("_", " ").strip().lower())
 
 
 def map_columns(headers: Iterable[str]) -> dict[str, str | None]:
@@ -88,7 +88,8 @@ def import_rows(conn: sqlite3.Connection, rows: list[dict[str, Any]], network: s
             + ", ".join(rows[0].keys())
         )
     known = {r["tracking_id"] for r in conn.execute("SELECT tracking_id FROM deals")}
-    stats = {"imported": 0, "duplicates": 0, "matched": 0, "skipped": 0}
+    stats = {"imported": 0, "updated": 0, "duplicates": 0, "matched": 0, "skipped": 0}
+    seen: dict[str, int] = {}
     for row in rows:
         get = lambda f: row.get(mapping[f]) if mapping[f] else None  # noqa: E731
         commission = _money(get("commission"))
@@ -99,16 +100,29 @@ def import_rows(conn: sqlite3.Connection, rows: list[dict[str, Any]], network: s
         order_ref = str(get("order_ref") or "").strip()
         if not order_ref:  # no id column: fingerprint the row so re-imports don't double count
             order_ref = "row-" + hashlib.sha1(repr(sorted(row.items())).encode()).hexdigest()[:16]
-        cur = conn.execute(
-            "INSERT OR IGNORE INTO earnings(network, tracking_id, event_date, sale_amount, "
-            "commission, order_ref, imported_at) VALUES (?,?,?,?,?,?,?)",
-            (network, tracking, _date(get("event_date")), _money(get("sale_amount")),
-             commission, order_ref, db.now_iso()),
-        )
-        if cur.rowcount:
+        # Same id twice in one report (e.g. a return adjustment) -> keep both lines.
+        seen[order_ref] = seen.get(order_ref, 0) + 1
+        if seen[order_ref] > 1:
+            order_ref = f"{order_ref}#{seen[order_ref]}"
+        values = (tracking, _date(get("event_date")), _money(get("sale_amount")), commission)
+        old = conn.execute(
+            "SELECT tracking_id, event_date, sale_amount, commission FROM earnings "
+            "WHERE network = ? AND order_ref = ?", (network, order_ref)).fetchone()
+        if old is None:
+            conn.execute(
+                "INSERT INTO earnings(network, tracking_id, event_date, sale_amount, "
+                "commission, order_ref, imported_at) VALUES (?,?,?,?,?,?,?)",
+                (network, *values, order_ref, db.now_iso()),
+            )
             stats["imported"] += 1
             if tracking in known:
                 stats["matched"] += 1
+        elif tuple(old) != values:
+            # Networks revise commissions later (pending -> approved, returns), so keep the latest.
+            conn.execute(
+                "UPDATE earnings SET tracking_id=?, event_date=?, sale_amount=?, commission=?, imported_at=? "
+                "WHERE network = ? AND order_ref = ?", (*values, db.now_iso(), network, order_ref))
+            stats["updated"] += 1
         else:
             stats["duplicates"] += 1
     conn.commit()

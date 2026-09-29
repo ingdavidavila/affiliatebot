@@ -8,6 +8,7 @@ from ..models import Deal
 
 class Source(ABC):
     name: str = "base"
+    show_price: bool = True  # False = posts show the % drop but not the price
 
     def __init__(self, options: dict[str, Any]):
         self.options = options

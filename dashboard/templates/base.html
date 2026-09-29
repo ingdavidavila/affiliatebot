@@ -22,7 +22,8 @@
         {% if demo %}<span class="pill warn">Demo data</span>
         {% elif dry_run %}<span class="pill warn">Dry run</span>
         {% else %}<span class="pill good">Live</span>{% endif %}
-        {% if paused %}<span class="pill bad">Paused</span>{% endif %}
+        {% if paused %}<span class="pill bad">Paused</span>
+        {% elif autopilot %}<span class="pill good">Autopilot</span>{% endif %}
       </div>
       <form method="post" action="{{ url_for('toggle_pause') }}">
         <input type="hidden" name="csrf" value="{{ csrf }}">

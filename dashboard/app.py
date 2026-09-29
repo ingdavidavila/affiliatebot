@@ -21,14 +21,23 @@ from .charts import line_chart
 
 REQUIRED_KEYS = {
     "X (posting)": ["X_API_KEY", "X_API_SECRET", "X_ACCESS_TOKEN", "X_ACCESS_TOKEN_SECRET"],
-    "eBay": ["EBAY_APP_ID", "EBAY_CERT_ID", "EPN_CAMPAIGN_ID"],
-    "Amazon (manual deals)": ["AMAZON_ASSOCIATE_TAG"],
+    "eBay deals": ["EBAY_APP_ID", "EBAY_CERT_ID", "EPN_CAMPAIGN_ID"],
+    "eBay earnings sync": ["EPN_ACCOUNT_SID", "EPN_AUTH_TOKEN"],
+    "Amazon deals (Keepa)": ["KEEPA_API_KEY", "AMAZON_ASSOCIATE_TAG"],
 }
 
 SETTING_FIELDS = [
     # key, label, type, help
-    ("approval_mode", "Approve deals before posting", "bool",
-     "When on, new deals wait in the Queue until you approve them."),
+    ("approval_mode", "Approve deals by hand before posting", "bool",
+     "Off = autopilot: the bot picks and posts deals on its own. On = new deals wait in the Queue for you."),
+    ("learn_from_sales", "Learn from sales", "bool",
+     "Favor categories that have actually earned money for you (after 8+ posts in a category)."),
+    ("category_cooldown_posts", "Category rotation (posts)", "number",
+     "Avoid repeating a category that was in the last this-many posts."),
+    ("max_deal_age_hours", "Drop deals older than (hours)", "number",
+     "Prices change, so stale deals are dropped instead of posted."),
+    ("failure_cooldown_hours", "Pause after 3 failed posts (hours)", "number",
+     "If posting fails 3 times in a row, wait this long, then retry automatically."),
     ("min_discount_pct", "Minimum discount (%)", "number", "Ignore deals smaller than this."),
     ("min_price", "Minimum price ($)", "number", "Cheap items earn tiny commissions."),
     ("max_price", "Maximum price ($)", "number", ""),
@@ -97,6 +106,7 @@ def create_app(cfg: dict[str, Any] | None = None, db_path: str | None = None, de
             "demo": demo,
             "dry_run": cfg["dry_run"],
             "paused": s["paused"],
+            "autopilot": not s["approval_mode"],
             "queued_count": conn().execute("SELECT COUNT(*) FROM deals WHERE status='queued'").fetchone()[0],
             "last_run": dict(last) if last else None,
             "fmt_money": _fmt_money,
@@ -173,9 +183,13 @@ def create_app(cfg: dict[str, Any] | None = None, db_path: str | None = None, de
             "ORDER BY e.event_date DESC, e.id DESC LIMIT 300").fetchall()
         expenses = c.execute("SELECT * FROM expenses ORDER BY date DESC LIMIT 100").fetchall()
         networks = [r[0] for r in c.execute("SELECT DISTINCT network FROM earnings ORDER BY 1")]
+        last_sync = c.execute("SELECT * FROM runs WHERE kind='sync' ORDER BY id DESC LIMIT 1").fetchone()
         return render_template("earnings.html", rows=rows, expenses=expenses,
                                networks=sorted(set(networks) | {"ebay", "amazon", "impact", "cj"}),
-                               today=datetime.now().date().isoformat())
+                               today=datetime.now().date().isoformat(),
+                               sync_networks=(cfg.get("earnings_sync") or {}).get("networks") or [],
+                               sync_hours=(cfg.get("earnings_sync") or {}).get("every_hours", 6),
+                               last_sync=dict(last_sync) if last_sync else None)
 
     @app.post("/earnings/import")
     def earnings_import():
@@ -189,9 +203,27 @@ def create_app(cfg: dict[str, Any] | None = None, db_path: str | None = None, de
             text = f.read().decode("utf-8-sig", errors="replace")
             st = import_csv(conn(), text, network)
             flash(f"Imported {st['imported']} rows ({st['matched']} matched to your posts). "
-                  f"{st['duplicates']} were already imported, {st['skipped']} skipped.")
+                  f"{st['updated']} updated, {st['duplicates']} unchanged, {st['skipped']} skipped.")
         except ValueError as exc:
             flash(str(exc), "error")
+        return redirect(url_for("earnings"))
+
+    @app.post("/earnings/sync")
+    def earnings_sync_now():
+        from bot.earnings_sync import sync_earnings
+        if not (cfg.get("earnings_sync") or {}).get("networks"):
+            flash("No networks set up for automatic sync. Add them under earnings_sync in config.yaml.", "error")
+            return redirect(url_for("earnings"))
+        try:
+            result = sync_earnings(cfg, force=True)
+        except Exception as exc:
+            flash(f"Sync failed: {exc}", "error")
+            return redirect(url_for("earnings"))
+        parts = [f"{n}: {st['imported']} new, {st.get('updated', 0)} updated" for n, st in result["networks"].items()]
+        if parts:
+            flash("Synced. " + "; ".join(parts))
+        for err in result["errors"]:
+            flash(err, "error")
         return redirect(url_for("earnings"))
 
     @app.post("/expenses/add")
@@ -218,8 +250,13 @@ def create_app(cfg: dict[str, Any] | None = None, db_path: str | None = None, de
     def settings_page():
         keys = {group: [(k, bool(secret(k))) for k in names] for group, names in REQUIRED_KEYS.items()}
         sources = [(name, bool((cfg["sources"].get(name) or {}).get("enabled"))) for name in SOURCE_CLASSES]
+        activity = []
+        for kind, label in (("find", "Finding deals"), ("post", "Posting"), ("sync", "Earnings sync")):
+            r = conn().execute("SELECT * FROM runs WHERE kind=? ORDER BY id DESC LIMIT 1", (kind,)).fetchone()
+            activity.append((label, dict(r) if r else None))
         return render_template("settings.html", s=settings(), fields=SETTING_FIELDS, keys=keys,
-                               sources=sources, db_path=cfg["database"])
+                               sources=sources, db_path=cfg["database"], activity=activity,
+                               sync_networks=(cfg.get("earnings_sync") or {}).get("networks") or [])
 
     @app.post("/settings")
     def settings_save():
@@ -261,14 +298,18 @@ def create_app(cfg: dict[str, Any] | None = None, db_path: str | None = None, de
             flash("A run is already in progress.", "error")
             return redirect(request.referrer or url_for("overview"))
         try:
+            from bot.earnings_sync import sync_earnings
             from bot.finder import find_deals
             from bot.poster import run_poster
             f = find_deals(cfg)
             p = run_poster(cfg)
+            s = sync_earnings(cfg)
             msg = f"Found {f['found']} deals, {f['added']} new. Posted {p['posted']}."
             if p["reasons"]:
                 msg += " " + "; ".join(p["reasons"])
-            flash(msg, "error" if f["errors"] else "info")
+            if s["ran"]:
+                msg += " Earnings synced." if not s["errors"] else " Earnings sync failed: " + "; ".join(s["errors"])
+            flash(msg, "error" if f["errors"] or s["errors"] else "info")
         except Exception as exc:
             flash(f"Run failed: {exc}", "error")
         finally:

@@ -10,13 +10,21 @@ from typing import Any
 from .base import Source
 from .demo import DemoSource
 from .ebay import EbaySource
+from .keepa import KeepaSource
 from .manual import ManualSource
 
 SOURCE_CLASSES: dict[str, type[Source]] = {
     "demo": DemoSource,
     "ebay": EbaySource,
+    "keepa": KeepaSource,
     "manual": ManualSource,
 }
+
+
+def shows_price(source_name: str) -> bool:
+    """Some networks don't allow showing prices from third-party data (see keepa.py)."""
+    cls = SOURCE_CLASSES.get(source_name)
+    return getattr(cls, "show_price", True) if cls else True
 
 
 def enabled_sources(cfg: dict[str, Any]) -> list[Source]:

@@ -3,10 +3,30 @@
 {% block body %}
 <header class="head"><h1>Earnings</h1></header>
 
+<section class="card">
+  <div class="head" style="margin:0">
+    <div>
+      <h2 style="margin-bottom:4px">Automatic sync</h2>
+      {% if sync_networks %}
+        <p class="muted small" style="margin:0">Pulls commissions from {{ sync_networks|join(', ') }} every {{ sync_hours }} hours, no downloads needed.
+        {% if last_sync %}Last sync {{ fmt_time(last_sync.started_at) }}{% if last_sync.message %}: <span class="neg-text">{{ last_sync.message }}</span>{% else %}: {{ last_sync.added }} new{% endif %}.{% else %}Hasn't run yet.{% endif %}</p>
+      {% else %}
+        <p class="muted small" style="margin:0">Off. Add your EPN_ACCOUNT_SID and EPN_AUTH_TOKEN to <code>.env</code> and set <code>earnings_sync: networks: [ebay]</code> in config.yaml to pull eBay earnings automatically.</p>
+      {% endif %}
+    </div>
+    {% if sync_networks %}
+    <form method="post" action="{{ url_for('earnings_sync_now') }}">
+      <input type="hidden" name="csrf" value="{{ csrf }}">
+      <button class="btn primary">Sync now</button>
+    </form>
+    {% endif %}
+  </div>
+</section>
+
 <div class="grid2">
   <section class="card">
-    <h2>Import a commission report</h2>
-    <p class="muted small">Download the transactions/earnings report from your network as a CSV and drop it here. Importing the same file twice won't double count.</p>
+    <h2>Import a report by hand (optional)</h2>
+    <p class="muted small">For networks without an API, like Amazon Associates. Download the earnings report as a CSV and drop it here. Importing the same file twice won't double count.</p>
     <form method="post" action="{{ url_for('earnings_import') }}" enctype="multipart/form-data" class="stack">
       <input type="hidden" name="csrf" value="{{ csrf }}">
       <label>Network
