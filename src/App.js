@@ -245,31 +245,56 @@ localStorage.setItem("authToken", response.data.token);
 
   return (
     <div className="app-wrapper">
-      <ToastContainer position="top-right" autoClose={4000} />
-      <div className="container mt-4">
+      <ToastContainer position="top-right" autoClose={4000} theme="dark" />
+      <div className="container">
         {/* Account Dropdown (only for paid users) */}
         {user && paid && (
-          <div style={{ position: "absolute", top: 10, left: 10 }}>
+          <div className="account-slot">
             <AccountDropdown user={user} onLogout={handleLogout} />
           </div>
         )}
 
-        <div className="card p-4 shadow">
-          <h1 className="text-center mb-3">AffiliateBot</h1>
+        <div className="card">
+          <div className="brand">
+            <span className="brand-mark" aria-hidden="true">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
+                <path d="M10 13a5 5 0 0 0 7.5.5l3-3a5 5 0 0 0-7-7l-1.7 1.7" />
+                <path d="M14 11a5 5 0 0 0-7.5-.5l-3 3a5 5 0 0 0 7 7l1.7-1.7" />
+              </svg>
+            </span>
+            <h1>AffiliateBot</h1>
+          </div>
 
           {!user ? (
-            <div className="text-center">
-              <p>Sign in to start checking your YouTube affiliate links.</p>
-              <GoogleLogin
-                onSuccess={handleLoginSuccess}
-                onError={() => toast.error("Google login failed.")}
-                scope="https://www.googleapis.com/auth/youtube.readonly"
-                text="signin_with"
-              />
+            <div className="hero">
+              <h2>
+                Stop losing sales to <span className="grad-text">broken links</span>
+              </h2>
+              <p>
+                Sign in and we'll scan every video on your YouTube channel for dead
+                affiliate links, so you can fix them before they cost you money.
+              </p>
+              <div className="signin">
+                <GoogleLogin
+                  onSuccess={handleLoginSuccess}
+                  onError={() => toast.error("Google login failed.")}
+                  scope="https://www.googleapis.com/auth/youtube.readonly"
+                  text="signin_with"
+                  theme="filled_black"
+                  shape="pill"
+                />
+              </div>
+              <ul className="features">
+                <li><b>🔍</b>Scans every video description</li>
+                <li><b>⚡</b>Results in about a minute</li>
+                <li><b>🆓</b>First 50 videos free</li>
+              </ul>
             </div>
           ) : (
-            <div className="text-center">
-              <p>Logged in as {user.email}</p>
+            <div className="user-row">
+              <span>
+                Logged in as <strong>{user.email}</strong>
+              </span>
               <button className="btn btn-outline-danger" onClick={handleLogout}>
                 Log Out
               </button>
@@ -279,27 +304,27 @@ localStorage.setItem("authToken", response.data.token);
           {user && showChannelPrompt && (
             <div className="mt-4">
               <h5>Enter Your YouTube Channel ID</h5>
-          <p className="text-muted small mb-2">
-            You can find your Channel ID by visiting{" "}
-            <a
-    href="https://support.google.com/youtube/answer/3250431?hl=en"
-    target="_blank"
-    rel="noopener noreferrer"
-  >
-    Find your Channel Id.
-  </a>{" "}
-          </p>
+              <p className="text-muted small mb-3">
+                You can find your Channel ID by visiting{" "}
+                <a
+                  href="https://support.google.com/youtube/answer/3250431?hl=en"
+                  target="_blank"
+                  rel="noopener noreferrer"
+                >
+                  Find your Channel Id.
+                </a>{" "}
+              </p>
 
-<input
-  type="text"
-  className="form-control mb-2"
-  placeholder="(e.g. UC1234567890ABCDE)"
-  value={channelInput}
-  onChange={(e) => setChannelInput(e.target.value)}
-/>
+              <input
+                type="text"
+                className="form-control mb-3"
+                placeholder="(e.g. UC1234567890ABCDE)"
+                value={channelInput}
+                onChange={(e) => setChannelInput(e.target.value)}
+              />
 
               <button
-                className="btn btn-primary"
+                className="btn btn-primary w-100"
                 onClick={handleChannelSubmit}
                 disabled={loading}
               >
@@ -309,53 +334,58 @@ localStorage.setItem("authToken", response.data.token);
           )}
 
           {!showChannelPrompt && results.length === 1 && results[0].message === "NO BROKEN LINKS FOUND" && (
-            <div className="text-center mt-4">
-            <h5 className="text-success">✅ No broken links found!</h5>
-            <p>Everything looks great on your channel 🎉</p>
+            <div className="all-clear mt-4">
+              <div className="tick">✓</div>
+              <h5 className="text-success">No broken links found!</h5>
+              <p className="text-muted mb-0">Everything looks great on your channel 🎉</p>
             </div>
           )}
 
-
           {results.length > 0 && !shouldShowPaywall && (
             <div className="mt-4">
-              <h5>Broken Links</h5>
-              <table className="table table-striped">
-                <thead>
-                  <tr>
-                    <th>Video</th>
-                    <th>Broken Link</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {currentResults.map((r, i) => (
-                    <tr key={i}>
-                      <td>
-                        <a
-                          href={`https://www.youtube.com/watch?v=${r.videoId}`}
-                          target="_blank"
-                          rel="noopener noreferrer"
-                        >
-                          View Video
-                        </a>
-                      </td>
-                      <td style={{ wordBreak: "break-all" }}>
-                        <a
-                          href={r.link}
-                          target="_blank"
-                          rel="noopener noreferrer"
-                        >
-                          {r.link}
-                        </a>
-                      </td>
+              <div className="results-head">
+                <h5>Broken Links</h5>
+                <span className="badge-count">{results.length} found</span>
+              </div>
+              <div className="table-wrap">
+                <table className="table table-striped table-hover">
+                  <thead>
+                    <tr>
+                      <th>Video</th>
+                      <th>Broken Link</th>
                     </tr>
-                  ))}
-                </tbody>
-              </table>
+                  </thead>
+                  <tbody>
+                    {currentResults.map((r, i) => (
+                      <tr key={i}>
+                        <td>
+                          <a
+                            href={`https://www.youtube.com/watch?v=${r.videoId}`}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                          >
+                            View Video
+                          </a>
+                        </td>
+                        <td style={{ wordBreak: "break-all" }}>
+                          <a
+                            href={r.link}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                          >
+                            {r.link}
+                          </a>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
 
               {totalPages > 1 && (
-                <div className="text-center mt-3">
+                <div className="pager">
                   <button
-                    className="btn btn-secondary me-2"
+                    className="btn btn-secondary"
                     disabled={currentPage === 1}
                     onClick={() => paginate(currentPage - 1)}
                   >
@@ -365,7 +395,7 @@ localStorage.setItem("authToken", response.data.token);
                     Page {currentPage} of {totalPages}
                   </span>
                   <button
-                    className="btn btn-secondary ms-2"
+                    className="btn btn-secondary"
                     disabled={currentPage === totalPages}
                     onClick={() => paginate(currentPage + 1)}
                   >
@@ -377,31 +407,28 @@ localStorage.setItem("authToken", response.data.token);
           )}
 
           {shouldShowPaywall && (
-            <div id="paywall-section" className="text-center mt-4">
+            <div id="paywall-section" className="paywall">
               <h5>Unlock Full Access</h5>
               <p>
                 Subscribe to view all broken links and check every video on your
                 channel.
               </p>
-              <div>
-                <button
-                  className="btn btn-outline-success"
-                  onClick={() => handleSubscribe("monthly")}
-                >
-                  $14.99 / month
+              <div className="plans">
+                <button className="plan" onClick={() => handleSubscribe("monthly")}>
+                  <span className="price">$14.99</span>
+                  <span className="per">per month</span>
                 </button>
-                <button
-                  className="btn btn-outline-success"
-                  onClick={() => handleSubscribe("yearly")}
-                >
-                  $99.99 / year
+                <button className="plan featured" onClick={() => handleSubscribe("yearly")}>
+                  <span className="ribbon">Best value</span>
+                  <span className="price">$99.99</span>
+                  <span className="per">per year</span>
                 </button>
               </div>
             </div>
           )}
         </div>
 
-        <footer className="text-center text-muted mt-4 mb-3">
+        <footer className="footer-note">
           Made by{" "}
           <a
             href="https://workingrobotsinc.com"
@@ -410,7 +437,6 @@ localStorage.setItem("authToken", response.data.token);
           >
             WorkingRobots Inc.
           </a>
-          
         </footer>
       </div>
     </div>
