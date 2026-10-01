@@ -87,3 +87,14 @@ export async function getJobStatus(jobId) {
   const res = await axios.get(`${API_BASE}/check-links/status/${jobId}`);
   return res;
 }
+
+/**
+ * Native (email + password) accounts
+ */
+export async function registerUser(email, password, confirmPassword) {
+  return axios.post(`${API_BASE}/auth/register`, { email, password, confirmPassword });
+}
+
+export async function loginUser(email, password) {
+  return axios.post(`${API_BASE}/auth/login`, { email, password });
+}

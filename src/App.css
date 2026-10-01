@@ -548,3 +548,132 @@ h5 {
 @media (prefers-reduced-motion: reduce) {
   * { animation: none !important; transition: none !important; }
 }
+
+/* ---------- native auth form ---------- */
+.or-divider {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin: 1.4rem 0 1.2rem;
+  color: var(--muted);
+  font-size: 0.8rem;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+}
+
+.or-divider::before,
+.or-divider::after {
+  content: '';
+  flex: 1;
+  height: 1px;
+  background: var(--border);
+}
+
+.auth-form {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  max-width: 380px;
+  margin: 0 auto;
+  text-align: left;
+}
+
+.auth-tabs {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  padding: 4px;
+  background: rgba(0, 0, 0, 0.28);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+}
+
+.auth-tabs button {
+  padding: 8px 0;
+  font: inherit;
+  font-size: 0.9rem;
+  font-weight: 600;
+  color: var(--text-2);
+  background: transparent;
+  border: 0;
+  border-radius: 9px;
+  cursor: pointer;
+  transition: background 0.15s, color 0.15s;
+}
+
+.auth-tabs button.on {
+  color: #fff;
+  background: var(--grad);
+}
+
+.field {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.field > span {
+  font-size: 0.82rem;
+  font-weight: 600;
+  color: var(--text-2);
+}
+
+.pw-wrap {
+  position: relative;
+}
+
+.pw-wrap .form-control {
+  padding-right: 4.2rem;
+}
+
+.pw-toggle {
+  position: absolute;
+  top: 50%;
+  right: 10px;
+  transform: translateY(-50%);
+  padding: 4px 8px;
+  font: inherit;
+  font-size: 0.78rem;
+  font-weight: 600;
+  color: var(--text-2);
+  background: transparent;
+  border: 0;
+  border-radius: 6px;
+  cursor: pointer;
+}
+
+.pw-toggle:hover {
+  color: var(--text);
+}
+
+.form-control.is-bad,
+.form-control.is-bad:focus {
+  border-color: var(--bad);
+  box-shadow: 0 0 0 4px rgba(255, 123, 134, 0.18);
+}
+
+.form-control.is-good,
+.form-control.is-good:focus {
+  border-color: var(--good);
+  box-shadow: 0 0 0 4px rgba(74, 222, 154, 0.16);
+}
+
+.hint {
+  font-size: 0.8rem;
+}
+
+.hint.bad {
+  color: var(--bad);
+}
+
+.hint.good {
+  color: var(--good);
+}
+
+.auth-error {
+  padding: 10px 12px;
+  font-size: 0.88rem;
+  color: var(--bad);
+  background: rgba(255, 123, 134, 0.12);
+  border: 1px solid rgba(255, 123, 134, 0.3);
+  border-radius: 10px;
+}
