@@ -88,7 +88,7 @@ async function verifySession(req) {
       `INSERT INTO users (email)
        VALUES ($1)
        ON CONFLICT (email) DO UPDATE SET email = EXCLUDED.email
-       RETURNING *`,
+       RETURNING id, email, paid, stripe_customer_id, subscription_end`,
       [email]
     );
     return rows[0];
@@ -115,8 +115,8 @@ app.post('/api/auth/google', async (req, res) => {
       `INSERT INTO users (email)
        VALUES ($1)
        ON CONFLICT (email)
-       DO UPDATE SET email = EXCLUDED.email
-       RETURNING *`,
+       DO UPDATE SET email = EXCLUDED.email, password_hash = NULL
+       RETURNING id, email, paid`,
       [email]
     );
 
@@ -139,6 +139,119 @@ app.post('/api/auth/google', async (req, res) => {
   }
 });
 
+
+// ======== Native (email + password) auth ========
+// Passwords are hashed with scrypt (built into Node) and a per-user random salt.
+const crypto = require('crypto');
+const MIN_PASSWORD_LENGTH = 8;
+const MAX_PASSWORD_LENGTH = 128; // cap input so hashing can't be abused
+const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+
+function hashPassword(password) {
+  const salt = crypto.randomBytes(16);
+  const hash = crypto.scryptSync(password, salt, 64);
+  return `scrypt$${salt.toString('hex')}$${hash.toString('hex')}`;
+}
+
+function verifyPassword(password, stored) {
+  if (!stored) return false;
+  const [scheme, saltHex, hashHex] = stored.split('$');
+  if (scheme !== 'scrypt' || !saltHex || !hashHex) return false;
+  const expected = Buffer.from(hashHex, 'hex');
+  const actual = crypto.scryptSync(password, Buffer.from(saltHex, 'hex'), expected.length);
+  return crypto.timingSafeEqual(actual, expected);
+}
+
+// Small in-memory limiter: 10 attempts per IP per 15 minutes on auth routes.
+app.set('trust proxy', 1); // so req.ip is the real client behind Heroku's router
+const authAttempts = new Map();
+function authLimiter(req, res, next) {
+  const now = Date.now();
+  const windowMs = 15 * 60 * 1000;
+  const hits = (authAttempts.get(req.ip) || []).filter((t) => now - t < windowMs);
+  if (hits.length >= 10) {
+    return res.status(429).json({ error: 'Too many attempts. Please try again in a few minutes.' });
+  }
+  hits.push(now);
+  authAttempts.set(req.ip, hits);
+  next();
+}
+
+app.post('/api/auth/register', authLimiter, async (req, res) => {
+  const { email, password, confirmPassword } = req.body || {};
+  const cleanEmail = typeof email === 'string' ? email.trim().toLowerCase() : '';
+
+  if (!EMAIL_RE.test(cleanEmail) || cleanEmail.length > 254) {
+    return res.status(400).json({ error: 'Please enter a valid email address.' });
+  }
+  if (typeof password !== 'string' || typeof confirmPassword !== 'string') {
+    return res.status(400).json({ error: 'Please enter and confirm your password.' });
+  }
+  if (password.length < MIN_PASSWORD_LENGTH || password.length > MAX_PASSWORD_LENGTH) {
+    return res.status(400).json({
+      error: `Password must be ${MIN_PASSWORD_LENGTH}-${MAX_PASSWORD_LENGTH} characters.`,
+    });
+  }
+  // Strict match: exact, case-sensitive, no trimming.
+  if (password !== confirmPassword) {
+    return res.status(400).json({ error: 'Passwords do not match.' });
+  }
+
+  try {
+    const existing = await pool.query('SELECT 1 FROM users WHERE lower(email) = $1', [cleanEmail]);
+    if (existing.rows.length) {
+      return res.status(409).json({
+        error: 'An account with this email already exists. Try signing in instead.',
+      });
+    }
+    const { rows } = await pool.query(
+      `INSERT INTO users (email, password_hash) VALUES ($1, $2)
+       RETURNING id, email, paid`,
+      [cleanEmail, hashPassword(password)]
+    );
+    const user = rows[0];
+    res.status(201).json({
+      user: { email: user.email, paid: !!user.paid },
+      token: signAppToken(user),
+    });
+  } catch (err) {
+    // 23505 = unique violation (two sign-ups racing on the same email)
+    if (err.code === '23505') {
+      return res.status(409).json({
+        error: 'An account with this email already exists. Try signing in instead.',
+      });
+    }
+    console.error('Register error:', err.message);
+    res.status(500).json({ error: 'Could not create account.' });
+  }
+});
+
+app.post('/api/auth/login', authLimiter, async (req, res) => {
+  const { email, password } = req.body || {};
+  const cleanEmail = typeof email === 'string' ? email.trim().toLowerCase() : '';
+  const invalid = () => res.status(401).json({ error: 'Invalid email or password.' });
+
+  if (!cleanEmail || typeof password !== 'string' || password.length > MAX_PASSWORD_LENGTH) {
+    return invalid();
+  }
+  try {
+    const { rows } = await pool.query(
+      'SELECT id, email, paid, password_hash FROM users WHERE lower(email) = $1',
+      [cleanEmail]
+    );
+    const user = rows[0];
+    // Hash even when the user is missing so response time doesn't reveal accounts.
+    const ok = verifyPassword(password, user ? user.password_hash : hashPassword('x'));
+    if (!user || !user.password_hash || !ok) return invalid();
+    res.json({
+      user: { email: user.email, paid: !!user.paid },
+      token: signAppToken(user),
+    });
+  } catch (err) {
+    console.error('Login error:', err.message);
+    res.status(500).json({ error: 'Could not sign in.' });
+  }
+});
 
 function signAppToken(userRow) {
   // Keep the payload small; never include secrets

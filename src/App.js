@@ -6,6 +6,8 @@ import "./App.css";
 import axios from "axios";
 import {
   authGoogle,
+  registerUser,
+  loginUser,
   getCurrentUser,
   createCheckoutSession,
   verifyPayment,
@@ -15,6 +17,7 @@ import {
 } from "./api";
 
 import AccountDropdown from "./AccountDropdown";
+import AuthForm from "./AuthForm";
 
 function App() {
   const [user, setUser] = useState(null);
@@ -77,35 +80,47 @@ useEffect(() => {
 
 
   // ===== Handle Google Login =====
+  // Shared by Google and email/password sign-in: store the app JWT, then check subscription.
+  const completeLogin = async (response) => {
+    setUser(response.data.user);
+    const token = response.data.token;
+    localStorage.setItem("authToken", token);
+
+    const stripeCheck = await axios.get(`${process.env.REACT_APP_API_URL}/api/stripe/status`, {
+      headers: { Authorization: `Bearer ${token}` },
+    });
+
+    if (stripeCheck.data.paid) {
+      setPaid(true);
+      toast.success("Subscription active — full access unlocked!");
+    } else {
+      setPaid(false);
+    }
+
+    setShowChannelPrompt(true);
+  };
+
   const handleLoginSuccess = async (cred) => {
     setLoading(true);
     try {
-  const response = await authGoogle(cred.credential);
-const userData = response.data.user;
-setUser(userData);
+      const response = await authGoogle(cred.credential);
+      await completeLogin(response);
+    } catch (err) {
+      console.error(err);
+      toast.error("Login failed.");
+    } finally {
+      setLoading(false);
+    }
+  };
 
-// ✅ Store the new JWT instead of Google ID token
-localStorage.setItem("authToken", response.data.token);
-
-  const token = response.data.token;
-  const stripeCheck = await axios.get(`${process.env.REACT_APP_API_URL}/api/stripe/status`, {
-  headers: { Authorization: `Bearer ${token}` },
-});
-
-  if (stripeCheck.data.paid) {
-    setPaid(true);
-    toast.success("Subscription active — full access unlocked!");
-  } else {
-    setPaid(false);
-  }
-
-  setShowChannelPrompt(true);
-} catch (err) {
-  console.error(err);
-  toast.error("Login failed.");
-} finally {
-  setLoading(false);
-}
+  // Email + password. Errors are thrown back to <AuthForm> so it can show them inline.
+  const handleNativeAuth = async ({ mode, email, password, confirm }) => {
+    const response =
+      mode === "signup"
+        ? await registerUser(email, password, confirm)
+        : await loginUser(email, password);
+    await completeLogin(response);
+    if (mode === "signup") toast.success("Account created!");
   };
 
   const handleLogout = () => {
@@ -284,6 +299,8 @@ localStorage.setItem("authToken", response.data.token);
                   shape="pill"
                 />
               </div>
+              <div className="or-divider"><span>or</span></div>
+              <AuthForm onSubmit={handleNativeAuth} />
               <ul className="features">
                 <li><b>🔍</b>Scans every video description</li>
                 <li><b>⚡</b>Results in about a minute</li>
