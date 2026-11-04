@@ -677,3 +677,84 @@ h5 {
   border: 1px solid rgba(255, 123, 134, 0.3);
   border-radius: 10px;
 }
+
+/* ---------- pricing summary, billing note, footer links ---------- */
+.pricing-summary {
+  margin-top: 1.5rem;
+  padding: 1.1rem 1rem 0.9rem;
+  text-align: center;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 14px;
+}
+
+.pricing-summary h3 {
+  margin: 0 0 0.75rem;
+  font-size: 0.78rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: var(--muted);
+}
+
+.price-rows {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 10px;
+}
+
+.price-rows div {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 10px 8px;
+  background: rgba(0, 0, 0, 0.22);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+}
+
+.price-rows strong {
+  font-size: 1rem;
+  letter-spacing: -0.01em;
+}
+
+.price-rows span {
+  font-size: 0.78rem;
+  color: var(--text-2);
+}
+
+.pricing-summary p {
+  margin: 0.8rem 0 0;
+  font-size: 0.8rem;
+  color: var(--muted);
+}
+
+.billing-note {
+  margin: 1.1rem auto 0;
+  max-width: 460px;
+  font-size: 0.78rem;
+  line-height: 1.55;
+  color: var(--muted);
+}
+
+.footer-links {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: 6px 18px;
+  margin-bottom: 0.6rem;
+}
+
+.footer-links a {
+  color: var(--text-2);
+  text-decoration: none;
+}
+
+.footer-links a:hover {
+  color: var(--text);
+  text-decoration: underline;
+}
+
+@media (max-width: 560px) {
+  .price-rows { grid-template-columns: 1fr; }
+}

@@ -306,6 +306,15 @@ useEffect(() => {
                 <li><b>⚡</b>Results in about a minute</li>
                 <li><b>🆓</b>First 50 videos free</li>
               </ul>
+              <div className="pricing-summary" id="pricing">
+                <h3>Simple pricing</h3>
+                <div className="price-rows">
+                  <div><strong>Free</strong><span>Scan your first 50 videos</span></div>
+                  <div><strong>$14.99 / month</strong><span>Every broken link, every video</span></div>
+                  <div><strong>$99.99 / year</strong><span>Same as monthly, billed yearly</span></div>
+                </div>
+                <p>Renews automatically until cancelled. Cancel any time.</p>
+              </div>
             </div>
           ) : (
             <div className="user-row">
@@ -441,11 +450,26 @@ useEffect(() => {
                   <span className="per">per year</span>
                 </button>
               </div>
+              <p className="billing-note">
+                Subscriptions renew automatically each month or year until you
+                cancel. Cancel any time from your Account menu and keep access
+                until the end of the period you paid for. Payments are processed
+                securely by Stripe. By subscribing you agree to our{" "}
+                <a href="/terms.html" target="_blank" rel="noopener noreferrer">Terms</a>,{" "}
+                <a href="/privacy.html" target="_blank" rel="noopener noreferrer">Privacy Policy</a> and{" "}
+                <a href="/refunds.html" target="_blank" rel="noopener noreferrer">Refund Policy</a>.
+              </p>
             </div>
           )}
         </div>
 
         <footer className="footer-note">
+          <nav className="footer-links" aria-label="Legal">
+            <a href="/terms.html">Terms</a>
+            <a href="/privacy.html">Privacy</a>
+            <a href="/refunds.html">Refunds &amp; Cancellation</a>
+            <a href="/contact.html">Contact</a>
+          </nav>
           Made by{" "}
           <a
             href="https://workingrobotsinc.com"

@@ -421,7 +421,14 @@ app.post('/api/create-checkout-session', async (req, res) => {
     customer: custId, // only customer, no customer_email allowed
     line_items: [{ price: priceId, quantity: 1 }],
     success_url: `${FRONTEND_URL}/?session_id={CHECKOUT_SESSION_ID}`,
-    cancel_url: `${FRONTEND_URL}/payment-cancelled`,
+    cancel_url: `${FRONTEND_URL}/payment-cancelled.html`,
+    // Billing disclosure shown next to the Subscribe button on Stripe Checkout
+    custom_text: {
+      submit: {
+        message:
+          `Your subscription renews automatically until you cancel. Cancel any time from your account; access continues until the end of the paid period. See our refund policy: ${FRONTEND_URL}/refunds.html`,
+      },
+    },
   });
 
   res.json({ url: session.url });
@@ -545,7 +552,7 @@ app.post('/api/session/refresh', async (req, res) => {
 });
 
 // ======== Serve Frontend ========
-app.use(express.static(path.join(__dirname, '../build')));
+app.use(express.static(path.join(__dirname, '../build'), { extensions: ['html'] })); // /terms -> terms.html
 app.get('*', (_, res) => {
   res.sendFile(path.join(__dirname, '../build/index.html'));
 });

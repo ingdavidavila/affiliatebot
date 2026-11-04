@@ -6,18 +6,44 @@
     <meta name="theme-color" content="#000000" />
     <meta
       name="description"
-      content="AffiliateBot: Check for broken affiliate links in your YouTube videos"
+      content="AffiliateBot scans your YouTube video descriptions for broken affiliate links so you stop losing commissions. Free scan of your first 50 videos; plans from $14.99/month."
     />
     <link rel="icon" href="%PUBLIC_URL%/favicon.ico" />
     <link rel="apple-touch-icon" href="%PUBLIC_URL%/logo192.png" />
     <link rel="manifest" href="%PUBLIC_URL%/manifest.json" />
     <!-- Bootstrap CSS -->
     <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/css/bootstrap.min.css" rel="stylesheet" />
-    <title>AffiliateBot</title>
+    <title>AffiliateBot – Find broken affiliate links in your YouTube videos</title>
+    <style>
+      html{background:#0b0b14}
+      .seo{max-width:680px;margin:0 auto;padding:48px 20px;color:#b4b4cc;font:16px/1.7 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif}
+      .seo h1,.seo h2{color:#f3f3fb;letter-spacing:-.02em}.seo a{color:#a99bff}.seo li{margin:.3rem 0}
+    </style>
   </head>
   <body>
-    <noscript>You need to enable JavaScript to run this app.</noscript>
-    <div id="root"></div>
+    <noscript>Please enable JavaScript to sign in and run a scan. Pricing, policies and contact details are shown above.</noscript>
+    <div id="root">
+      <!-- Plain-HTML copy for crawlers and reviewers that don't run JavaScript. React replaces it on load. -->
+      <div class="seo">
+        <h1>AffiliateBot</h1>
+        <p>AffiliateBot scans the descriptions of the videos on your YouTube channel and finds affiliate links that no longer work (Amazon, ShareASale, Impact, Rakuten, CJ, ClickBank, Awin and more), so you can fix them before they cost you commissions.</p>
+        <h2>How it works</h2>
+        <ol>
+          <li>Sign in with Google or create an account with your email.</li>
+          <li>Enter your YouTube channel ID.</li>
+          <li>We scan your videos and list every broken affiliate link.</li>
+        </ol>
+        <h2>Pricing</h2>
+        <ul>
+          <li><strong>Free:</strong> scan the first 50 videos of your channel to see whether you have broken links.</li>
+          <li><strong>Monthly:</strong> $14.99 per month. View every broken link and scan all your videos.</li>
+          <li><strong>Yearly:</strong> $99.99 per year. Same as Monthly, billed once a year.</li>
+        </ul>
+        <p>Subscriptions renew automatically until cancelled. Cancel any time from your account; access continues until the end of the paid period. Payments are processed securely by Stripe.</p>
+        <p><a href="/terms.html">Terms of Service</a> &middot; <a href="/privacy.html">Privacy Policy</a> &middot; <a href="/refunds.html">Refunds &amp; Cancellation</a> &middot; <a href="/contact.html">Contact: support@affiliatesbot.com</a></p>
+        <p>&copy; WorkingRobots Inc.</p>
+      </div>
+    </div>
     <!-- Bootstrap JS -->
     <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/js/bootstrap.bundle.min.js"></script>
   </body>
