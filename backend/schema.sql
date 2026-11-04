@@ -1,0 +1,40 @@
+CREATE TABLE IF NOT EXISTS users (
+  id SERIAL PRIMARY KEY,
+  email VARCHAR(255) UNIQUE NOT NULL,
+  stripe_customer_id VARCHAR(255) UNIQUE,
+  stripe_subscription_id VARCHAR(255),
+  paid BOOLEAN DEFAULT FALSE,
+  subscription_end TIMESTAMP,   
+  created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE TABLE IF NOT EXISTS subscriptions (
+  id SERIAL PRIMARY KEY,
+  user_id INTEGER REFERENCES users(id) ON DELETE CASCADE,
+  stripe_subscription_id VARCHAR(255) UNIQUE NOT NULL,
+  plan_type VARCHAR(50),
+  status VARCHAR(50) NOT NULL,
+  created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+  UNIQUE (user_id, stripe_subscription_id)
+);
+
+CREATE TABLE IF NOT EXISTS broken_links (
+  id SERIAL PRIMARY KEY,
+  channel_id VARCHAR(255) NOT NULL,
+  video_id VARCHAR(255) NOT NULL,
+  broken_link TEXT NOT NULL,
+  checked_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE TABLE IF NOT EXISTS jobs (
+  id SERIAL PRIMARY KEY,
+  channel_id VARCHAR(50) NOT NULL,
+  max_videos INTEGER NOT NULL,
+  status VARCHAR(20) DEFAULT 'pending',
+  result JSON,
+  created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+  updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
+);
+
+-- Native (email + password) accounts. NULL for Google-only accounts.
+ALTER TABLE users ADD COLUMN IF NOT EXISTS password_hash TEXT;

@@ -1,0 +1,66 @@
+{
+  "name": "affiliatebot",
+  "version": "0.1.0",
+  "private": true,
+  "heroku-run-build-script": false,
+  "dependencies": {
+    "@react-oauth/google": "^0.12.2",
+    "@stripe/react-stripe-js": "^5.2.0",
+    "@stripe/stripe-js": "^8.1.0",
+    "@testing-library/dom": "^10.4.1",
+    "@testing-library/jest-dom": "^6.9.1",
+    "@testing-library/react": "^16.3.0",
+    "@testing-library/user-event": "^13.5.0",
+    "axios": "^1.12.2",
+    "bootstrap": "^5.3.8",
+    "browserify-zlib": "^0.2.0",
+    "buffer": "^6.0.3",
+    "jsonwebtoken": "^9.0.2",
+    "os-browserify": "^0.3.0",
+    "path-browserify": "^1.0.1",
+    "process": "^0.11.10",
+    "react": "^19.2.0",
+    "react-dom": "^19.2.0",
+    "react-scripts": "5.0.1",
+    "react-toastify": "^11.0.5",
+    "stream-browserify": "^3.0.0",
+    "web-vitals": "^2.1.4"
+  },
+  "scripts": {
+    "start": "react-app-rewired start",
+    "build": "react-app-rewired build",
+    "test": "react-app-rewired test",
+    "eject": "react-scripts eject"
+  },
+  "eslintConfig": {
+    "extends": [
+      "react-app",
+      "react-app/jest"
+    ],
+    "rules": {
+      "import/first": "off"
+    },
+    "globals": {
+      "loadStripe": "readonly"
+    }
+  },
+  "browserslist": {
+    "production": [
+      ">0.2%",
+      "not dead",
+      "not op_mini all"
+    ],
+    "development": [
+      "last 1 chrome version",
+      "last 1 firefox version",
+      "last 1 safari version"
+    ]
+  },
+  "engines": {
+    "node": "18.20.0",
+    "npm": "9.0.0"
+  },
+  "devDependencies": {
+    "react-app-rewired": "^2.2.1"
+  }
+}
